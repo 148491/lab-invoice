@@ -65,6 +65,9 @@ Sans nom de domaine, omettez-le : le site est servi sur `http://IP-DU-SERVEUR`. 
 un service systemd, Caddy (HTTPS Let's Encrypt automatique) et une sauvegarde quotidienne de la base.
 Mise à jour : `sudo bash /opt/lab-facturation/deploy/update.sh`.
 
+**Railway :** *New Project* › *Deploy from GitHub repo* › Lab-Invoicing, puis ajoutez un **Volume** monté sur `/data`
+et générez un domaine (*Settings › Networking › Generate Domain*). Configuration fournie : `railway.json`.
+
 **Gratuit :** PythonAnywhere, sans carte bancaire, données conservées. Suivez le guide pas à pas
 [docs/DEPLOIEMENT-GRATUIT.md](docs/DEPLOIEMENT-GRATUIT.md) (≈ 10 minutes).
 

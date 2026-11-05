@@ -8,8 +8,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY static ./static
 COPY scripts ./scripts
-RUN useradd -m lab && mkdir -p /data && chown lab /data
-USER lab
-VOLUME ["/data"]
+COPY wsgi.py ./
+COPY deploy/entrypoint.sh /entrypoint.sh
+RUN useradd -m lab && mkdir -p /data && chown lab /data && chmod +x /entrypoint.sh
 EXPOSE 8000
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*'"]
+CMD ["/entrypoint.sh"]
