@@ -1,0 +1,18 @@
+# Déploiement en un clic sur Render (https://render.com) : New + > Blueprint > ce dépôt.
+services:
+  - type: web
+    name: lab-facturation
+    runtime: docker
+    plan: starter            # un disque persistant nécessite une offre payante
+    healthCheckPath: /api/auth/state
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: FACTU_DB
+        value: /data/facturation.db
+      - key: FACTU_SECURE_COOKIE
+        value: "1"
+      - key: ANTHROPIC_API_KEY   # facultatif : active le rapprochement des noms par IA
+        sync: false

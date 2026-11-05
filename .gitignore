@@ -1,0 +1,10 @@
+# Données de paie et de facturation : ne jamais versionner
+data/
+samples/
+*.xlsx
+!tests/fixtures/*.xlsx
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+docs/reconciliation.md
