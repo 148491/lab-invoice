@@ -60,7 +60,8 @@ def build(conn) -> dict:
                 tc = p["cost"].setdefault(mo, {})
                 tc[kind] = round(tc.get(kind, 0) + d["cost"], 2)
     status = {}
-    roles = {r["name"]: r["role"] or "" for r in db.rows(conn, "SELECT name, role FROM collaborators")}
+    cols = {r["name"]: r for r in db.rows(conn, "SELECT name, role, team FROM collaborators")}
+    roles = {n: r["role"] or "" for n, r in cols.items()}
     proj = {p["lot"]: (p["status"], p["mel_date"]) for p in db.rows(conn, "SELECT lot, status, mel_date FROM projects")}
     epics = {e["lot_name"]: (e["status"], e["mel_date"]) for e in db.rows(conn, "SELECT lot_name, status, mel_date FROM epics")}
     for x in lots:
@@ -68,4 +69,5 @@ def build(conn) -> dict:
             stt = proj.get(x["lot"]) or epics.get(x["lot"]) or ("IN PROGRESS", None)
             status[x["lot"]] = {"status": stt[0], "mel": stt[1]}
     return {"months": months, "lots": lots, "status": status, "currency": s.get("currency") or "",
-            "team": [{"name": n, "role": roles.get(n, ""), "poste": poste(roles.get(n, "")), **v} for n, v in team.items()]}
+            "team": [{"name": n, "role": roles.get(n, ""), "poste": poste(roles.get(n, "")),
+                      "team": (cols[n]["team"] or "") if n in cols else "", **v} for n, v in team.items()]}

@@ -12,14 +12,16 @@ const kmoney = (v) => Math.abs(v) >= 1e6 ? (v / 1e6).toFixed(2).replace(".", ","
 const pct = (v) => (v * 100).toFixed(1).replace(".", ",") + " %";
 const sum = (a, f) => a.reduce((s, x) => s + f(x), 0);
 
-let DATA = null, MONTHS = [], ROOT = null;
-const st = { from: null, to: null, types: new Set(TYPES.map((t) => t[0])), tab: "overview", sort: { k: "price", d: -1 }, q: "", status: "all", tables: {}, quick: "all", member: null, poste: null, unit: "h", msort: { k: "h", d: -1 } };
+let DATA = null, RAW = null, MONTHS = [], ROOT = null;
+const st = { from: null, to: null, types: new Set(TYPES.map((t) => t[0])), tab: "overview", sort: { k: "price", d: -1 }, q: "", status: "all", tables: {}, quick: "all", member: null, poste: null, grp: "", unit: "h", msort: { k: "h", d: -1 } };
 const hfmt = (v) => nf0.format(v) + " pts";
 const h1 = (v) => (Math.round(v * 10) / 10).toLocaleString("fr-FR") + " pts";
 
 export async function render(view) {
   view.innerHTML = `<div class="skel-wrap"><div class="skel" style="height:60px"></div><div class="skel" style="height:320px"></div></div>`;
-  DATA = await api("/api/analytics");
+  RAW = await api("/api/analytics");
+  applyGroup();
+  DATA = DATA || RAW;
   MONTHS = DATA.months.map((x) => x.m);
   if (!MONTHS.length) { view.innerHTML = `<div class="card">${empty("Pas encore de données", "Les analyses portent sur les factures validées. Validez une facture ou lancez la reprise des fichiers Excel (Paramètres).", "pie")}</div>`; return; }
   if (!st.from || !MONTHS.includes(st.from)) { st.from = MONTHS[0]; st.to = MONTHS.at(-1); }
@@ -30,6 +32,7 @@ export async function render(view) {
     <div class="an-filters card" role="toolbar" aria-label="Filtres">
       <label for="anFrom">Période</label><select id="anFrom"></select><span class="faint">→</span><select id="anTo"></select>
       <div class="seg" id="anQuick">${[["3", "3 mois"], ["6", "6 mois"], ["12", "12 mois"], ["all", "Tout"]].map(([k, l]) => `<button data-q="${k}" class="${st.quick === k ? "on" : ""}">${l}</button>`).join("")}</div>
+      ${RAW.team.length ? `<label for="anGrp" style="margin-left:6px">Équipe</label><select id="anGrp">${groupOptions()}</select>` : ""}
       <div class="row" style="gap:6px;flex-wrap:wrap;margin-left:auto"><span class="small muted" style="font-weight:600">Types</span><div id="anTypes" class="row" style="gap:6px;flex-wrap:wrap"></div></div></div>
     <div class="tabs" id="anTabs">${[["overview", "Vue d'ensemble"], ["projects", "Projets"], ["recurring", "Activités récurrentes"], ["domains", "Domaines"], ...(DATA.team.length ? [["team", "Équipe"]] : [])].map(([k, l]) => `<button data-t="${k}" class="${st.tab === k ? "on" : ""}">${l}</button>`).join("")}</div>
     <div id="anView"></div></div>`;
@@ -49,6 +52,7 @@ export async function render(view) {
     b.classList.toggle("off", !st.types.has(k)); b.setAttribute("aria-pressed", st.types.has(k)); draw();
   });
   view.querySelectorAll("#anTabs button").forEach((b) => b.onclick = () => { view.querySelectorAll("#anTabs button").forEach((x) => x.classList.toggle("on", x === b)); st.tab = b.dataset.t; st.member = null; draw(); });
+  if ($("#anGrp", view)) $("#anGrp", view).onchange = (e) => { st.grp = e.target.value; st.member = null; st.poste = null; applyGroup(); closeDrawer(); draw(); };
   ensureOverlays();
   draw();
 }
@@ -304,43 +308,61 @@ function teamView(v) {
 }
 
 // ---------------------------------------------------------------- panneaux de détail
-function openDrawer(title, sub, body) {
-  drawer.innerHTML = `<div class="dh"><div style="flex:1;min-width:0"><div class="xs faint">${sub}</div><h2 style="font-size:17px;margin-top:2px">${esc(title)}</h2></div><button class="icon-btn" aria-label="Fermer">${icon("x")}</button></div><div class="db">${body}</div>`;
-  drawer.querySelector(".icon-btn").onclick = closeDrawer; drawer.classList.add("on");
-  drawer.querySelectorAll("[data-member]").forEach((r) => r.onclick = () => { closeDrawer(); openMember(r.dataset.member); });
+let redrawDrawer = null;
+const isCost = () => st.unit === "c";
+const uval = (l) => (isCost() ? l.price : l.hours);
+const ufmt = (v) => (isCost() ? kmoney(v) : hfmt(v));
+function openDrawer(title, sub, render) {
+  redrawDrawer = () => {
+    drawer.innerHTML = `<div class="dh"><div style="flex:1;min-width:0"><div class="xs faint">${sub}</div><h2 style="font-size:17px;margin-top:2px">${esc(title)}</h2></div>
+      <div class="seg" id="anDUnit"><button data-u="h" class="${isCost() ? "" : "on"}">Points</button><button data-u="c" class="${isCost() ? "on" : ""}">Coût</button></div>
+      <button class="icon-btn" aria-label="Fermer">${icon("x")}</button></div><div class="db">${render()}</div>`;
+    drawer.querySelector(".icon-btn").onclick = closeDrawer;
+    drawer.querySelectorAll("#anDUnit button").forEach((b) => b.onclick = () => { if (st.unit === b.dataset.u) return; st.unit = b.dataset.u; redrawDrawer(); draw(); });
+    drawer.querySelectorAll("[data-member]").forEach((r) => r.onclick = () => { closeDrawer(); openMember(r.dataset.member); });
+    drawer.querySelectorAll("[data-lot]").forEach((r) => r.onclick = () => r.dataset.kind === "Projet" ? projectDrawer(r.dataset.lot) : familyDrawer(r.dataset.base));
+  };
+  redrawDrawer(); drawer.classList.add("on");
 }
+function byMonth(ls) { const b = {}; ls.forEach((l) => (b[l.m] = (b[l.m] || 0) + uval(l))); return b; }
 function seriesBlock(byM, label) {
   const max = Math.max(1, ...Object.values(byM));
-  return `<div class="xs muted" style="margin-bottom:6px">${label}</div><div class="an-series">${MONTHS.map((m) => `<div title="${ml(m)} : ${money(byM[m] || 0)}" style="background:${inRange(m) ? "var(--s1)" : "var(--seq-1)"};height:${(byM[m] || 0) / max * 100}%;min-height:${byM[m] ? 2 : 0}px"></div>`).join("")}</div><div class="xs faint row between" style="margin-top:4px"><span>${ml(MONTHS[0])}</span><span>${ml(MONTHS.at(-1))}</span></div>`;
+  return `<div class="xs muted" style="margin-bottom:6px">${label}</div><div class="an-series">${MONTHS.map((m) => `<div title="${ml(m)} : ${isCost() ? money(byM[m] || 0) : h1(byM[m] || 0)}" style="background:${inRange(m) ? "var(--s1)" : "var(--seq-1)"};height:${(byM[m] || 0) / max * 100}%;min-height:${byM[m] ? 2 : 0}px"></div>`).join("")}</div><div class="xs faint row between" style="margin-top:4px"><span>${ml(MONTHS[0])}</span><span>${ml(MONTHS.at(-1))}</span></div>`;
 }
 function teamBlock(ls) {
-  const t = {}; ls.forEach((l) => l.team.forEach(([n, h]) => (t[n] = (t[n] || 0) + h)));
-  const T = Object.entries(t).sort((a, b) => b[1] - a[1]), max = T[0]?.[1] || 1;
+  const t = {}; ls.forEach((l) => l.team.forEach(([n, h, c]) => (t[n] = (t[n] || 0) + (isCost() ? c : h))));
+  const T = Object.entries(t).filter((x) => x[1] > 0).sort((a, b) => b[1] - a[1]), max = T[0]?.[1] || 1;
   if (!T.length) return "";
   const tot = sum(T, (x) => x[1]);
-  return `<h3 style="margin:20px 0 8px">Qui a travaillé dessus (période)</h3>${T.map(([n, h]) => abar(n, [{ v: h, c: "--s1" }], max, `${nf0.format(h)} pts · ${Math.round(h / tot * 100)} %`, `data-link="1" data-member="${esc(n)}"`)).join("")}`;
+  return `<h3 style="margin:20px 0 4px">Qui a travaillé dessus (période)</h3><div class="xs faint" style="margin-bottom:8px">${isCost() ? "Coût salarial affecté à chacun et sa part du coût salarial du lot" : "Points de chacun et sa part des points du lot"} · cliquez sur un nom pour sa fiche</div>
+    ${T.map(([n, x]) => abar(n, [{ v: x, c: "--s1" }], max, `${ufmt(x)} · ${Math.round(x / tot * 100)} %`, `data-link="1" data-member="${esc(n)}"`)).join("")}`;
 }
+const kpi2 = (ls) => { const H = sum(ls, (l) => l.hours), C = sum(ls, (l) => l.price);
+  return `<div class="kpi ${isCost() ? "" : "kpi-on"}"><div class="kpi-label">Points (heures)</div><div class="kpi-value">${nf0.format(H)}</div><div class="kpi-sub">sur la période</div></div>
+    <div class="kpi ${isCost() ? "kpi-on" : ""}"><div class="kpi-label">Coût (hors cost +)</div><div class="kpi-value">${kmoney(C)}</div><div class="kpi-sub">${H ? money(C / H) + " / point" : "—"}</div></div>`; };
 function projectDrawer(lot) {
-  const ls = DATA.lots.filter((l) => l.lot === lot), byM = {}; ls.forEach((l) => (byM[l.m] = (byM[l.m] || 0) + l.price));
-  const s2 = DATA.status[lot] || {}, tot = sum(ls, (l) => l.price), per = sum(ls.filter((l) => inRange(l.m)), (l) => l.price);
-  openDrawer(lot, `Projet · ${esc(ls[0]?.dom || "")}`, `<div class="grid g2" style="margin-bottom:16px">
-    <div class="kpi"><div class="kpi-label">Coût total</div><div class="kpi-value">${kmoney(tot)}</div><div class="kpi-sub">${Object.keys(byM).length} mois facturés</div></div>
-    <div class="kpi"><div class="kpi-label">Statut</div><div class="kpi-value" style="font-size:18px">${s2.status === "PRODUCTION" ? "En ligne" : "En cours"}</div><div class="kpi-sub">${s2.mel ? "mis en ligne le " + s2.mel.split("-").reverse().join("/") : "pas encore en ligne"}</div></div></div>
-    ${seriesBlock(byM, `Montant par mois · ${kmoney(per)} sur la période (en foncé)`)}${teamBlock(ls.filter((l) => inRange(l.m)))}`);
+  const ls = DATA.lots.filter((l) => l.lot === lot), s2 = DATA.status[lot] || {};
+  openDrawer(lot, `Projet · ${esc(ls[0]?.dom || "")} · ${s2.status === "PRODUCTION" ? "en ligne" + (s2.mel ? " le " + s2.mel.split("-").reverse().join("/") : "") : "en cours"}`, () => {
+    const per = ls.filter((l) => inRange(l.m));
+    return `<div class="grid g2" style="margin-bottom:16px">${kpi2(per)}</div>
+      ${seriesBlock(byMonth(ls), `${isCost() ? "Coût" : "Points"} par mois · total toutes périodes ${ufmt(sum(ls, uval))} · ${Object.keys(byMonth(ls)).length} mois (période en foncé)`)}${teamBlock(per)}`;
+  });
 }
 function familyDrawer(base) {
-  const ls = DATA.lots.filter((l) => l.base === base), byM = {}; ls.forEach((l) => (byM[l.m] = (byM[l.m] || 0) + l.price));
-  const tot = sum(ls.filter((l) => inRange(l.m)), (l) => l.price), n = months().length;
-  openDrawer(base, `Activité récurrente · ${typeOf(ls[0]?.kind)?.[2] || ""}`, `<div class="grid g2" style="margin-bottom:16px">
-    <div class="kpi"><div class="kpi-label">Sur la période</div><div class="kpi-value">${kmoney(tot)}</div><div class="kpi-sub">${n} mois</div></div>
-    <div class="kpi"><div class="kpi-label">Moyenne mensuelle</div><div class="kpi-value">${kmoney(tot / Math.max(1, n))}</div><div class="kpi-sub">un lot « - MM/AA » par mois</div></div></div>
-    ${seriesBlock(byM, "Montant par mois (période en foncé)")}${teamBlock(ls.filter((l) => inRange(l.m)))}`);
+  const ls = DATA.lots.filter((l) => l.base === base);
+  openDrawer(base, `Activité récurrente · ${typeOf(ls[0]?.kind)?.[2] || ""}`, () => {
+    const per = ls.filter((l) => inRange(l.m)), n = months().length;
+    return `<div class="grid g2" style="margin-bottom:16px">${kpi2(per)}</div>
+      <div class="xs muted" style="margin-bottom:12px">Moyenne mensuelle : <b>${ufmt(sum(per, uval) / Math.max(1, n))}</b> sur ${n} mois · un lot « - MM/AA » par mois</div>
+      ${seriesBlock(byMonth(ls), `${isCost() ? "Coût" : "Points"} par mois (période en foncé)`)}${teamBlock(per)}`;
+  });
 }
 function monthDrawer(m) {
-  const ls = lots().filter((l) => l.m === m).sort((a, b) => b.price - a.price), tot = sum(ls, (l) => l.price), max = ls[0]?.price || 1;
-  openDrawer(`Facture de ${ml(m).replace(".", "")}`, "Lots du mois", `<div class="kpi" style="margin-bottom:14px"><div class="kpi-label">Montant (hors cost +)</div><div class="kpi-value">${money(tot)}</div><div class="kpi-sub">${ls.length} lots</div></div>
-    ${ls.map((l) => abar(l.lot, [{ v: l.price, c: typeOf(l.kind)[1] }], max, kmoney(l.price), `data-lot="${esc(l.lot)}" data-kind="${l.kind}" data-base="${esc(l.base)}" style="cursor:pointer"`)).join("")}`);
-  drawer.querySelectorAll("[data-lot]").forEach((r) => r.onclick = () => r.dataset.kind === "Projet" ? projectDrawer(r.dataset.lot) : familyDrawer(r.dataset.base));
+  openDrawer(`Facture de ${ml(m).replace(".", "")}`, "Lots du mois", () => {
+    const ls = lots().filter((l) => l.m === m).sort((a, b) => uval(b) - uval(a)), max = uval(ls[0] || { price: 1, hours: 1 }) || 1;
+    return `<div class="grid g2" style="margin-bottom:14px">${kpi2(ls)}</div>
+      ${ls.map((l) => abar(l.lot, [{ v: uval(l), c: typeOf(l.kind)[1] }], max, ufmt(uval(l)), `data-lot="${esc(l.lot)}" data-kind="${l.kind}" data-base="${esc(l.base)}" style="cursor:pointer"`)).join("")}`;
+  });
 }
 
 // ---------------------------------------------------------------- fiche d'un membre de l'équipe
@@ -402,3 +424,27 @@ function memberView(v) {
     { label: `${cost ? "Coût" : "Points"} par mois`, axis: cost ? kmoney : (x) => nf0.format(x), fmt: Fx, h: 260 });
 }
 const pbar = (x, c = "--s1") => `<span class="pbar"><i style="width:${Math.min(100, x * 100)}%;background:var(${c})"></i></span>${pct(x)}`;
+
+// ---------------------------------------------------------------- filtre équipe / poste (en haut de page)
+function groupOptions() {
+  const teams = [...new Set(RAW.team.map((p) => p.team).filter(Boolean))].sort((a, b) => a.localeCompare(b, "fr"));
+  const postes = POSTES.filter((g) => RAW.team.some((p) => p.poste === g));
+  const o = (v, l) => `<option value="${esc(v)}" ${st.grp === v ? "selected" : ""}>${esc(l)}</option>`;
+  return o("", "Toute l'équipe") + (teams.length ? `<optgroup label="Équipes">${teams.map((t) => o("team:" + t, t)).join("")}</optgroup>` : "")
+    + `<optgroup label="Postes">${postes.map((g) => o("poste:" + g, g)).join("")}</optgroup>`;
+}
+// Restreint toutes les données aux membres du groupe choisi : points = leurs points ;
+// coût du lot = coût du lot × leur part du salaire du lot (ou des points si pas de salaire).
+function applyGroup() {
+  if (!st.grp) { DATA = RAW; return; }
+  const [kind, val] = [st.grp.slice(0, st.grp.indexOf(":")), st.grp.slice(st.grp.indexOf(":") + 1)];
+  const keep = new Set(RAW.team.filter((p) => (kind === "team" ? p.team : p.poste) === val).map((p) => p.name));
+  const lots = [];
+  RAW.lots.forEach((l) => {
+    const team = l.team.filter((t) => keep.has(t[0])); if (!team.length) return;
+    const h = sum(team, (t) => t[1]), c = sum(team, (t) => t[2]);
+    const share = l.salary > 0 ? c / l.salary : (l.hours > 0 ? h / l.hours : 0);
+    lots.push({ ...l, team, hours: h, salary: c, price: l.price * share });
+  });
+  DATA = { ...RAW, lots, team: RAW.team.filter((p) => keep.has(p.name)) };
+}
