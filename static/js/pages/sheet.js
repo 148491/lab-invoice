@@ -1,5 +1,5 @@
 /* Éditeur de feuille de temps : utilisé par « Mes temps » et par les chefs de projet pour saisir à la place de quelqu'un. */
-import { $, $$, api, esc, fmt, icon, combobox, modal, toast, progressRing, confirmDialog } from "../core.js";
+import { $, $$, api, esc, fmt, icon, combobox, modal, toast, progressRing, confirmDialog, stepHalf } from "../core.js";
 
 export async function sheetEditor(host, monthKey, collaborator, { onSaved } = {}) {
   host.innerHTML = `<div class="skel-wrap"><div class="skel" style="height:140px"></div><div class="skel"></div><div class="skel"></div></div>`;
@@ -63,7 +63,7 @@ export async function sheetEditor(host, monthKey, collaborator, { onSaved } = {}
       lot.addEventListener("input", () => { rows[i].label = lot.value; dirty = true; });
       h.addEventListener("input", () => { rows[i].hours = h.value; dirty = true; updateTotals(); });
       c.addEventListener("input", () => { rows[i].comment = c.value; dirty = true; });
-      $$("[data-step]", el).forEach((b) => (b.onclick = () => { const v = Math.max(0, (fmt.parse(h.value) || 0) + +b.dataset.step); h.value = String(v).replace(".", ","); rows[i].hours = h.value; dirty = true; updateTotals(); }));
+      $$("[data-step]", el).forEach((b) => (b.onclick = () => { const v = stepHalf(fmt.parse(h.value) || 0, +b.dataset.step); h.value = String(v).replace(".", ","); rows[i].hours = h.value; dirty = true; updateTotals(); }));
       $("[data-del]", el)?.addEventListener("click", () => { rows.splice(i, 1); dirty = true; drawRows(); });
       $$("[data-sugg]", el).forEach((a) => (a.onclick = (e) => { e.preventDefault(); rows[i].label = a.dataset.sugg; rows[i].err = null; dirty = true; drawRows(); }));
     });

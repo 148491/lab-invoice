@@ -294,3 +294,10 @@ export async function download(url) {
   a.href = URL.createObjectURL(blob); a.download = name; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
+
+/** Bouton + / − : passe au multiple de 0,5 suivant ou précédent (0,29 → 0,5 → 1 ; 0,57 → 0,5 → 0). */
+export function stepHalf(v, dir, step = 0.5) {
+  const x = +v || 0, eps = 1e-9;
+  const n = dir > 0 ? Math.floor(x / step + eps) + 1 : Math.ceil(x / step - eps) - 1;
+  return Math.max(0, Math.round(n * step * 100) / 100);
+}

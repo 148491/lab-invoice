@@ -1,5 +1,5 @@
 /* Facture du mois : temps → charges → répartitions → CAPEX & FG → contrôles → facture. */
-import { $, $$, S, api, can, esc, fmt, icon, month, chip, statusChip, empty, modal, toast, dropzone, confirmDialog, formDialog, avatar, hoursBar, download, combobox } from "../core.js";
+import { $, $$, S, api, can, esc, fmt, icon, month, chip, statusChip, empty, modal, toast, dropzone, confirmDialog, formDialog, avatar, hoursBar, download, combobox, stepHalf } from "../core.js";
 import { go, rerender, updateNavBadge } from "../app.js";
 
 const TABS = [
@@ -412,7 +412,7 @@ function adjustDialog(x, d) {
           inp.addEventListener("input", () => { rows[i].hours = fmt.parse(inp.value) || 0; sums(); });
           inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); const all = $$(".a-h", el); all[all.indexOf(inp) + 1]?.focus(); all[all.indexOf(inp) + 1]?.select(); } });
           inp.addEventListener("focus", () => inp.select());
-          tr.querySelectorAll("[data-st]").forEach((b) => (b.onclick = () => { rows[i].hours = Math.max(0, Math.round(((+rows[i].hours || 0) + +b.dataset.st) * 100) / 100); inp.value = String(rows[i].hours).replace(".", ","); sums(); }));
+          tr.querySelectorAll("[data-st]").forEach((b) => (b.onclick = () => { rows[i].hours = stepHalf(rows[i].hours, +b.dataset.st); inp.value = String(rows[i].hours).replace(".", ","); sums(); }));
           tr.querySelector("[data-rm]").onclick = () => { rows.splice(i, 1); draw(); };
         });
         sums();
