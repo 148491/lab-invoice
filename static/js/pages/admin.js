@@ -113,7 +113,7 @@ async function settings(view) {
         <div class="row"><div class="field" style="flex:1"><label>Historique à partir de</label><input type="month" id="hf" value="2025-01"></div></div>
         <button class="btn primary" id="runReprise" disabled>${icon("zap")}Lancer la reprise</button>
         <p class="xs faint" style="margin:0">Rejouable : l'historique repris est remplacé ; comptes, saisies et mois en cours sont conservés.</p></div></div>
-    <div class="card card-pad"><h3>Assistant IA</h3><p class="small ${S.ai ? "" : "muted"}" style="margin:0">${S.ai ? `${icon("sparkles")} Actif : les noms inconnus sont rapprochés par Claude en plus de l'algorithme local.` : "Inactif. Définissez la variable ANTHROPIC_API_KEY sur le serveur pour l'activer ; le rapprochement local (orthographe, ordre des mots, initiales, translittération) fonctionne sans."}</p></div>
+    <div class="card card-pad"><h3>Assistant IA</h3><p class="small ${S.ai ? "" : "muted"}" style="margin:0">${S.ai ? `${icon("sparkles")} Actif — ${esc(S.aiLabel || "")} : les noms inconnus sont rapprochés par l'IA en plus de l'algorithme local.` : "Inactif. Définissez sur le serveur la variable OPENAI_API_KEY (clé OpenAI) ou ANTHROPIC_API_KEY (clé Claude) pour l'activer ; le rapprochement local (orthographe, ordre des mots, initiales, translittération) fonctionne sans."}</p></div>
     <div class="card card-pad"><h3>Version 2 — Jira</h3><p class="small muted" style="margin:0">L'import des temps est isolé : il pourra lire directement les worklogs Jira (projets MC et RD10) au lieu du fichier.</p></div></div></div>`;
   $("#saveMk", view).onclick = async () => {
     const data = Object.fromEntries(new FormData($("#mk", view)));

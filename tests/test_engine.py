@@ -264,3 +264,29 @@ def test_monthly_lots_by_name():
     assert db.monthly_kind("FASTERIZE", s) == "Run"
     assert db.monthly_kind("CX - DIGITRIPS", s) is None
     assert db.monthly_kind("SILO PAGES 2026", s) is None
+
+
+def test_ai_openai_provider(monkeypatch):
+    import httpx
+    from app import ai
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    seen = {}
+
+    def handler(request):
+        seen["auth"] = request.headers["Authorization"]
+        seen["body"] = json.loads(request.content)
+        content = json.dumps({"matches": [
+            {"input": "jerome.martin", "match": "Jérôme Martin", "confidence": 0.95, "reason": "identifiant"},
+            {"input": "Inconnu", "match": None, "confidence": 0.1, "reason": "aucun"},
+            {"input": "Pirate", "match": "Pas dans la liste", "confidence": 0.9, "reason": "invention"}]})
+        return httpx.Response(200, json={"choices": [{"message": {"content": content, "refusal": None}}]})
+
+    assert ai.provider() == "openai"
+    out = ai.match_names(["jerome.martin", "Inconnu", "Pirate"], ["Jérôme Martin", "Marie Dupont"],
+                         transport=httpx.MockTransport(handler))
+    assert out == {"jerome.martin": {"name": "Jérôme Martin", "score": 0.95, "reason": "IA : identifiant"}}
+    assert seen["auth"] == "Bearer test"
+    assert seen["body"]["response_format"]["json_schema"]["strict"] is True
+    # erreur côté OpenAI : pas d'exception, simple retour au rapprochement local
+    assert ai.match_names(["x"], ["y"], transport=httpx.MockTransport(lambda r: httpx.Response(401))) == {}

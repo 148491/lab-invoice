@@ -89,7 +89,7 @@ def auth_state(request: Request):
         user = auth.public_user(current_user(request))
     except HTTPException:
         pass
-    return {"needs_setup": n == 0, "user": user, "ai": ai.enabled()}
+    return {"needs_setup": n == 0, "user": user, "ai": ai.enabled(), "ai_label": ai.label()}
 
 
 def _set_cookie(resp: Response, token: str):

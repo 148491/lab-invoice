@@ -32,7 +32,7 @@ theme.apply(theme.get());
 // ------------------------------------------------------------------ démarrage
 async function boot() {
   const st = await api("/api/auth/state");
-  S.ai = st.ai;
+  S.ai = st.ai; S.aiLabel = st.ai_label;
   if (st.needs_setup) return renderSetup();
   if (!st.user) return renderLogin();
   S.user = st.user;
