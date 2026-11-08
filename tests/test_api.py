@@ -175,3 +175,42 @@ def test_entities_and_open_lots(admin):
     r = c.get(f"/api/months/{m}").json()
     assert r["stats"]["hours"] == pytest.approx(10) and r["stats"]["cost_total"] == pytest.approx(1000)
     assert any(i["code"] == "outside_entity" and "Carl Cx" in i["message"] for i in r["issues"])
+
+
+def test_editable_roles_impersonation_and_export(app_mod, admin):
+    c = admin
+    assert c.post("/api/users", json={"username": "chef", "display_name": "Chef", "role": "chef_projet",
+                                      "password": "motdepasse2"}).status_code == 200
+    info = c.get("/api/users").json()
+    assert info["roles"]["admin"]["locked"] and "impersonate" in info["roles"]["admin"]["perms"]
+    assert "analytics" in info["roles"]["chef_projet"]["perms"]
+    chef = login(app_mod, "chef", "motdepasse2")
+    assert chef.get("/api/analytics").status_code == 200
+    assert chef.get("/api/audit").status_code == 403
+    # retirer l'analyse au chef de projet, donner le journal
+    perms = [p for p in info["roles"]["chef_projet"]["perms"] if p != "analytics"] + ["audit"]
+    assert c.put("/api/roles", json={"chef_projet": perms}).status_code == 200
+    assert c.put("/api/roles", json={"admin": []}).status_code == 400
+    assert c.put("/api/roles", json={"finance": ["nope"]}).status_code == 400
+    assert chef.get("/api/analytics").status_code == 403
+    assert chef.get("/api/audit").status_code == 200
+    me = chef.get("/api/auth/state").json()["user"]
+    assert "audit" in me["perms"] and "analytics" not in me["perms"]
+    # connexion « en tant que » : lecture seule, retour au compte d'origine
+    uid = next(u["id"] for u in info["users"] if u["username"] == "chef")
+    assert c.post(f"/api/users/{uid}/impersonate").status_code == 200
+    st = c.get("/api/auth/state").json()["user"]
+    assert st["username"] == "chef" and st["impersonated_by"]["username"] == "admin"
+    assert c.get("/api/analytics").status_code == 403
+    assert c.post("/api/ref/epics", json={"label": "X", "lot_name": "X"}).status_code == 403
+    r = c.post("/api/auth/impersonate/stop")
+    assert r.status_code == 200 and not r.json()["relogin"]
+    assert c.get("/api/auth/state").json()["user"]["username"] == "admin"
+    assert chef.post(f"/api/users/{uid}/impersonate").status_code == 403
+    assert c.delete("/api/roles").status_code == 200
+    assert chef.get("/api/analytics").status_code == 200
+    # export Excel d'une liste
+    x = c.post("/api/export/xlsx", json={"title": "Epics Jira", "filename": "epics", "columns": ["Clé", "Lot", "Mise en ligne"],
+                                         "rows": [["EPICS-1", "=HACK()", "2026-03-31"]]})
+    ws = openpyxl.load_workbook(io.BytesIO(x.content)).active
+    assert ws["A1"].value == "Clé" and ws["B2"].value == "'=HACK()" and ws["C2"].value.year == 2026

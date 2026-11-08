@@ -1,5 +1,5 @@
 /* Référentiels : projets (MEP), epics Jira, collaborateurs. */
-import { $, $$, api, can, esc, fmt, icon, chip, statusChip, empty, modal, formDialog, toast, confirmDialog, avatar, debounce, field as fieldHtml } from "../core.js";
+import { $, $$, api, can, esc, fmt, icon, chip, statusChip, empty, modal, formDialog, toast, confirmDialog, avatar, debounce, download, field as fieldHtml } from "../core.js";
 import { rerender } from "../app.js";
 
 const STATUS = [["IN PROGRESS", "En cours"], ["PRODUCTION", "En ligne"], ["ABANDONED", "Abandonné"]];
@@ -65,7 +65,8 @@ export async function render(view, { arg, params }) {
   const values = (k) => [...new Set(data.map((r) => String(r[k] ?? "")))].sort((a, b) => a.localeCompare(b, "fr"));
 
   view.innerHTML = `<div class="page-head"><div class="grow"><div class="crumbs">${icon("layers")}Référentiels</div><h1>${cfg.title}</h1><div class="sub">${cfg.sub}</div></div>
-      ${editable ? `<div class="toolbar"><button class="btn primary" id="add">${icon("plus")}Ajouter</button></div>` : ""}</div>
+      <div class="toolbar"><div class="seg" role="group" aria-label="Exporter la liste affichée"><button id="expCsv" title="Exporter la liste affichée (recherche et filtres appliqués) en CSV">${icon("download")}CSV</button><button id="expXlsx" title="Exporter la liste affichée (recherche et filtres appliqués) en Excel">${icon("download")}Excel</button></div>
+        ${editable ? `<button class="btn primary" id="add">${icon("plus")}Ajouter</button>` : ""}</div></div>
     <div class="alert alert-info" style="margin-bottom:16px">${icon("info")}<div>${cfg.help}</div></div>
     <div class="card"><div class="card-head" style="gap:10px">
         <div class="input-icon" style="flex:1;min-width:220px;max-width:420px">${icon("search")}<input id="q" placeholder="Rechercher dans toutes les colonnes…" value="${esc(st.q)}"></div>
@@ -177,6 +178,31 @@ export async function render(view, { arg, params }) {
     $$("[data-sel]", view).forEach((cb) => cb.onchange = () => { const id = isNaN(+cb.dataset.sel) ? cb.dataset.sel : +cb.dataset.sel; cb.checked ? st.sel.add(id) : st.sel.delete(id); drawBulk(); });
     drawBulk();
   };
+  // ------------------------------------------------ export de la liste affichée (filtres, recherche et tri appliqués)
+  const exportCols = () => (arg === "epics" ? [["epic_key", "Clé epic"], ...cfg.cols] : cfg.cols);
+  const exportVal = (r, k) => {
+    const v = r[k];
+    if (k === "aliases") return JSON.parse(v || "[]").join(", ");
+    if (k === "mode" && v === "mirror") return `Miroir · ${r.mirror_of || "?"}`;
+    if (ENUM_LABEL[k]) return v === "" || v == null ? "" : enumLabel(k, v);
+    return v ?? "";
+  };
+  const stamp = () => new Date().toISOString().slice(0, 10);
+  $("#expCsv", view).onclick = () => {
+    const cols = exportCols();
+    const q = (x) => { let t = String(x ?? ""); if (t.length > 1 && /^[=+\-@]/.test(t) && isNaN(+t.replace(",", "."))) t = "'" + t; return /[";\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+    const csv = "\ufeff" + [cols.map(([, l]) => q(l)).join(";"), ...rowsCache.map((r) => cols.map(([k]) => q(exportVal(r, k))).join(";"))].join("\r\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" })); a.download = `${arg}-${stamp()}.csv`; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    toast(`${rowsCache.length} ligne(s) exportée(s)`, "success");
+  };
+  $("#expXlsx", view).onclick = async () => {
+    const cols = exportCols();
+    await download("/api/export/xlsx", { method: "POST", json: { title: cfg.title, filename: `${arg}-${stamp()}`, columns: cols.map(([, l]) => l), rows: rowsCache.map((r) => cols.map(([k]) => exportVal(r, k))) } });
+    toast(`${rowsCache.length} ligne(s) exportée(s)`, "success");
+  };
+
   const drawBulk = () => {
     const bar = $("#bulkbar", view); if (!bar) return;
     bar.hidden = !st.sel.size;

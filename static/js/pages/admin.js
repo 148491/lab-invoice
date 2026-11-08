@@ -8,20 +8,45 @@ export async function render(view, { arg }) {
   return settings(view);
 }
 
-const PERM_LABEL = { view: "Consulter factures et tableau de bord", "time.self": "Saisir ses temps", "time.all": "Gérer les temps de tous", costs: "Charges employeur", invoice: "CAPEX / FG et validation des factures", ref: "Référentiels", users: "Comptes et paramètres" };
 
 async function users(view) {
-  const [{ users, roles }, collabs] = await Promise.all([api("/api/users"), api("/api/ref/collaborators")]);
+  const [{ users, roles, perms }, collabs] = await Promise.all([api("/api/users"), api("/api/ref/collaborators")]);
+  const canImp = S.user.perms.includes("impersonate");
   view.innerHTML = `<div class="page-head"><div class="grow"><div class="crumbs">${icon("shield")}Administration</div><h1>Comptes & droits</h1><div class="sub">Qui peut se connecter et ce que chacun peut faire.</div></div>
       <div class="toolbar"><button class="btn" id="bulk">${icon("users")}Créer les comptes de l'équipe</button><button class="btn primary" id="add">${icon("userPlus")}Nouveau compte</button></div></div>
-    <div class="grid g4" style="margin-bottom:16px">${Object.entries(roles).map(([k, r]) => `<div class="kpi"><div class="kpi-label">${icon(k === "admin" ? "shield" : k === "collaborateur" ? "clock" : "users")}${esc(r.label)}</div><div class="kpi-value">${users.filter((u) => u.role === k && u.active).length}</div><div class="kpi-sub">${r.perms.map((p) => PERM_LABEL[p]).filter(Boolean).slice(0, 3).join(" · ")}${r.perms.length > 3 ? "…" : ""}</div></div>`).join("")}</div>
+    <div class="grid g4" style="margin-bottom:16px">${Object.entries(roles).map(([k, r]) => `<div class="kpi"><div class="kpi-label">${icon(k === "admin" ? "shield" : k === "collaborateur" ? "clock" : "users")}${esc(r.label)}</div><div class="kpi-value">${users.filter((u) => u.role === k && u.active).length}</div><div class="kpi-sub">${r.locked ? "tous les droits" : `${r.perms.length} droit${r.perms.length > 1 ? "s" : ""} sur ${perms.length}`} · comptes actifs</div></div>`).join("")}</div>
     <div class="card"><div class="table-wrap tall"><table class="t responsive"><thead><tr><th>Utilisateur</th><th>Identifiant</th><th>Rôle</th><th>Collaborateur rattaché</th><th>Dernière connexion</th><th>Statut</th><th></th></tr></thead><tbody>
     ${users.map((u, i) => `<tr class="clickable" data-i="${i}"><td class="primary-cell" data-l=""><div class="person">${avatar(u.display_name)}<b>${esc(u.display_name)}</b></div></td><td data-l="Identifiant" class="mono">${esc(u.username)}</td>
       <td data-l="Rôle">${chip(u.role_label, u.role === "admin" ? "brand" : "")}</td><td data-l="Collaborateur">${u.collaborator ? esc(u.collaborator) : '<span class="faint">—</span>'}</td>
-      <td data-l="Connexion" class="small">${u.last_login ? fmt.datetime(u.last_login) : '<span class="faint">jamais</span>'}</td><td data-l="Statut">${u.active ? (u.must_change ? chip("Mot de passe à changer", "warning") : chip("Actif", "success")) : chip("Désactivé")}</td><td class="actions">${icon("chevR", "faint")}</td></tr>`).join("")}
+      <td data-l="Connexion" class="small">${u.last_login ? fmt.datetime(u.last_login) : '<span class="faint">jamais</span>'}</td><td data-l="Statut">${u.active ? (u.must_change ? chip("Mot de passe à changer", "warning") : chip("Actif", "success")) : chip("Désactivé")}</td>
+      <td class="actions nowrap">${canImp && u.active && u.role !== "admin" && u.id !== S.user.id ? `<button class="btn sm ghost" data-imp="${u.id}" title="Voir l'application exactement comme ${esc(u.display_name)} (lecture seule)">${icon("eye")}Voir en tant que</button>` : ""}${icon("chevR", "faint")}</td></tr>`).join("")}
     </tbody></table></div></div>
-    <div class="card card-pad" style="margin-top:16px"><h3>Droits par rôle</h3><div class="table-wrap"><table class="t"><thead><tr><th>Droit</th>${Object.values(roles).map((r) => `<th style="text-align:center">${esc(r.label)}</th>`).join("")}</tr></thead><tbody>
-      ${Object.entries(PERM_LABEL).map(([p, l]) => `<tr><td>${l}</td>${Object.values(roles).map((r) => `<td style="text-align:center">${r.perms.includes(p) ? `<span style="color:var(--success)">${icon("check")}</span>` : '<span class="faint">—</span>'}</td>`).join("")}</tr>`).join("")}</tbody></table></div></div>`;
+    <div class="card" style="margin-top:16px"><div class="card-head"><div class="grow"><h2>Droits par rôle</h2><div class="desc">Cochez les droits de chaque rôle puis enregistrez. L'administrateur garde toujours tous les droits. Les changements s'appliquent immédiatement à tous les comptes du rôle.</div></div>
+      <button class="btn sm ghost" id="permReset">${icon("history")}Valeurs par défaut</button><button class="btn sm primary" id="permSave" disabled>${icon("check")}Enregistrer</button></div>
+      <div class="table-wrap"><table class="t perm-matrix"><thead><tr><th>Droit</th>${Object.values(roles).map((r) => `<th class="c">${esc(r.label)}</th>`).join("")}</tr></thead><tbody>
+      ${perms.map((p, i) => `${i === 0 || perms[i - 1].group !== p.group ? `<tr class="grp"><td colspan="${Object.keys(roles).length + 1}">${esc(p.group)}</td></tr>` : ""}<tr><td>${esc(p.label)}</td>${Object.entries(roles).map(([k, r]) => `<td class="c"><input type="checkbox" data-role="${k}" data-perm="${p.key}" aria-label="${esc(r.label)} : ${esc(p.label)}" ${r.perms.includes(p.key) ? "checked" : ""} ${r.locked ? "disabled" : ""}></td>`).join("")}</tr>`).join("")}</tbody></table></div></div>`;
+  const permState = () => { const o = {}; Object.entries(roles).forEach(([k, r]) => { if (!r.locked) o[k] = $$(`input[data-role="${k}"]:checked`, view).map((c) => c.dataset.perm); }); return o; };
+  $$(".perm-matrix input", view).forEach((c) => c.onchange = () => {
+    c.parentElement.classList.toggle("changed", c.checked !== roles[c.dataset.role].perms.includes(c.dataset.perm));
+    $("#permSave", view).disabled = !$$(".perm-matrix td.changed", view).length;
+  });
+  $("#permSave", view).onclick = async () => {
+    const st = permState();
+    const lostAll = Object.entries(st).filter(([, p]) => !p.length).map(([k]) => roles[k].label);
+    if (lostAll.length && !(await confirmDialog("Rôle sans aucun droit", `${lostAll.join(", ")} n'aura plus accès à rien. Continuer ?`))) return;
+    await api("/api/roles", { method: "PUT", json: st }); toast("Droits enregistrés", "success"); rerender();
+  };
+  $("#permReset", view).onclick = async () => {
+    if (!(await confirmDialog("Rétablir les droits par défaut ?", "Les personnalisations de tous les rôles seront effacées."))) return;
+    await api("/api/roles", { method: "DELETE" }); toast("Droits par défaut rétablis", "success"); rerender();
+  };
+  $$("[data-imp]", view).forEach((b) => b.onclick = async (e) => {
+    e.stopPropagation();
+    const u = users.find((x) => x.id === +b.dataset.imp);
+    if (!(await confirmDialog(`Se connecter en tant que ${u.display_name} ?`, `Vous verrez l'application exactement comme ${esc(u.display_name)} (${esc(u.role_label)}), en lecture seule, pendant 2 heures au plus. Un bandeau permet de revenir à votre compte. L'action est inscrite au journal.`, { ok: "Se connecter" }))) return;
+    await api(`/api/users/${u.id}/impersonate`, { method: "POST" });
+    location.hash = ""; location.reload();
+  });
   const roleOpts = Object.entries(roles).map(([k, r]) => [k, r.label]);
   const collabOpts = [["", "— Aucun —"], ...collabs.filter((c) => c.active).map((c) => [c.name, c.name])];
   const userForm = (u) => modal({

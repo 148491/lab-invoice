@@ -286,8 +286,8 @@ export function hoursBar(h, expected, tol = 0.2) {
 
 export function debounce(fn, ms = 250) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
-export async function download(url) {
-  const r = await api(url);
+export async function download(url, opts = {}) {
+  const r = await api(url, opts);
   const blob = await r.blob();
   const name = (r.headers.get("content-disposition") || "").match(/filename="([^"]+)"/)?.[1] || "export.xlsx";
   const a = document.createElement("a");

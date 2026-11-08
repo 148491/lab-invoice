@@ -214,6 +214,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE collaborators ADD COLUMN entity TEXT NOT NULL DEFAULT ''")
     if "team" not in cols:
         conn.execute("ALTER TABLE collaborators ADD COLUMN team TEXT NOT NULL DEFAULT ''")
+    scols = {r[1] for r in conn.execute("PRAGMA table_info(sessions)")}
+    if "impersonator_id" not in scols:
+        conn.execute("ALTER TABLE sessions ADD COLUMN impersonator_id INTEGER")
+    if "return_token" not in scols:
+        conn.execute("ALTER TABLE sessions ADD COLUMN return_token TEXT")
 
 
 def init(conn: sqlite3.Connection) -> None:

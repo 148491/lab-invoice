@@ -8,7 +8,7 @@ export async function render(view) {
   if (!ms.length) {
     view.innerHTML = `<div class="page-head"><div class="grow"><h1>Bienvenue ${esc(S.user.display_name.split(" ")[0])}</h1><div class="sub">Votre espace est prêt. Trois étapes pour démarrer.</div></div></div>
       <div class="grid g3">
-        ${[["upload", "1. Reprendre vos fichiers Excel", "Facturation Paris, Charge Patronale et le dernier timesheet : l'historique est chargé et chaque facture recalculée.", "parametres", "Ouvrir la reprise", can("users")],
+        ${[["upload", "1. Reprendre vos fichiers Excel", "Facturation Paris, Charge Patronale et le dernier timesheet : l'historique est chargé et chaque facture recalculée.", "parametres", "Ouvrir la reprise", can("settings")],
            ["shield", "2. Créer les comptes de l'équipe", "Un compte par collaborateur pour qu'il saisisse ses temps, et les rôles Finance / Chef de projet.", "comptes", "Gérer les comptes", can("users")],
            ["invoice", "3. Préparer la facture du mois", "Import du timesheet avec vérification, charges, CAPEX et frais généraux, contrôles.", `mois/${month.current()}/temps`, "Commencer", can("time.all")]]
           .filter((x) => x[5]).map(([ic, t, d, href, cta]) => `<div class="card card-pad"><div class="drop-ic" style="margin:0 0 12px">${icon(ic)}</div><h2>${t}</h2><p class="small muted" style="margin:6px 0 14px">${d}</p><a class="btn primary" href="#/${href}">${cta}</a></div>`).join("")}

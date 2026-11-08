@@ -144,3 +144,47 @@ def invoice_workbook(res: dict, settings: dict) -> bytes:
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+def table_xlsx(title: str, columns: list, rows: list) -> bytes:
+    """Classeur d'une feuille : en-tête en gras, filtres automatiques, volets figés, largeurs ajustées."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "".join(c for c in title if c not in '[]:*?/\\') or "Export"
+    cols = [str(c) for c in columns]
+    for j, c in enumerate(cols, start=1):
+        cell = ws.cell(1, j, c)
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = HEAD
+        cell.alignment = Alignment(vertical="center", wrap_text=True)
+    for i, r in enumerate(rows, start=2):
+        for j, v in enumerate(r, start=1):
+            if isinstance(v, str) and len(v) > 32000:
+                v = v[:32000]
+            if isinstance(v, str) and len(v) > 1 and v[:1] in ("=", "+", "-", "@") and not _is_number(v):
+                v = "'" + v          # pas de formule injectée depuis le contenu
+            if isinstance(v, str) and len(v) == 10 and v[4] == "-" and v[7] == "-":
+                try:
+                    v = date.fromisoformat(v)
+                except ValueError:
+                    pass
+            c = ws.cell(row=i, column=j, value=v)
+            if isinstance(v, date):
+                c.number_format = "DD/MM/YYYY"
+    for j, c in enumerate(cols, start=1):
+        width = max([len(c)] + [len(str(r[j - 1])) for r in rows[:500] if j - 1 < len(r) and r[j - 1] is not None])
+        ws.column_dimensions[get_column_letter(j)].width = min(60, max(10, width + 2))
+    if cols:
+        ws.auto_filter.ref = f"A1:{get_column_letter(len(cols))}{max(1, len(rows) + 1)}"
+    ws.freeze_panes = "A2"
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def _is_number(v: str) -> bool:
+    try:
+        float(v.replace(",", "."))
+        return True
+    except ValueError:
+        return False

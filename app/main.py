@@ -57,6 +57,9 @@ COSTS = Depends(require("costs"))
 INVOICE = Depends(require("invoice"))
 REF = Depends(require("ref"))
 USERS = Depends(require("users"))
+SETTINGS = Depends(require("settings"))
+AUDIT = Depends(require("audit"))
+ANALYTICS = Depends(require("analytics"))
 
 
 def _month(m: str) -> str:
@@ -125,7 +128,7 @@ def login(response: Response, body: dict = Body(...)):
         raise HTTPException(401, "Identifiant ou mot de passe incorrect")
     _set_cookie(response, auth.create_session(conn, r["id"]))
     db.audit(conn, dict(r), "connexion")
-    return {"user": auth.public_user(dict(r))}
+    return {"user": auth.public_user(dict(r), auth.perms_of(conn, r["role"]))}
 
 
 @app.post("/api/auth/logout")
@@ -133,6 +136,9 @@ def logout(request: Request, response: Response):
     token = request.cookies.get(auth.COOKIE)
     if token:
         with db.tx(conn):
+            r = conn.execute("SELECT return_token FROM sessions WHERE token=?", (token,)).fetchone()
+            if r and r["return_token"]:
+                conn.execute("DELETE FROM sessions WHERE token=?", (r["return_token"],))
             conn.execute("DELETE FROM sessions WHERE token=?", (token,))
     response.delete_cookie(auth.COOKIE, path="/")
     return {"ok": True}
@@ -152,8 +158,84 @@ def change_password(body: dict = Body(...), user=Depends(current_user)):
 # ================================================================== comptes
 @app.get("/api/users")
 def users_list(user=USERS):
-    return {"users": [auth.public_user(u) for u in db.rows(conn, "SELECT * FROM users ORDER BY active DESC, display_name")],
-            "roles": {k: {"label": v["label"], "perms": sorted(v["perms"])} for k, v in auth.ROLES.items()}}
+    rp = auth.role_perms(conn)
+    return {"users": [auth.public_user(u, rp.get(u["role"], rp["collaborateur"]))
+                      for u in db.rows(conn, "SELECT * FROM users ORDER BY active DESC, display_name")],
+            "roles": {k: {"label": v["label"], "perms": sorted(rp[k]), "locked": bool(v.get("locked")),
+                          "defaults": sorted(v["perms"])} for k, v in auth.ROLES.items()},
+            "perms": [{"key": k, "label": l, "group": g} for k, l, g in auth.PERMS]}
+
+
+@app.put("/api/roles")
+def roles_update(body: dict = Body(...), user=USERS):
+    """Droits par rôle (l'administrateur garde toujours tous les droits)."""
+    cur = {k: sorted(v) for k, v in auth.role_perms(conn).items() if not auth.ROLES[k].get("locked")}
+    for role, perms in body.items():
+        if role not in cur:
+            raise HTTPException(400, f"Rôle non modifiable : {role}")
+        bad = set(perms) - auth.ALL_PERMS
+        if bad:
+            raise HTTPException(400, f"Droit inconnu : {', '.join(sorted(bad))}")
+        cur[role] = sorted(set(perms))
+    with db.tx(conn):
+        conn.execute("INSERT INTO settings(key, value) VALUES ('role_perms', ?) "
+                     "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (json.dumps(cur),))
+    db.audit(conn, user, "droits.modification", None, {k: cur[k] for k in body})
+    return {"ok": True}
+
+
+@app.delete("/api/roles")
+def roles_reset(user=USERS):
+    with db.tx(conn):
+        conn.execute("DELETE FROM settings WHERE key='role_perms'")
+    db.audit(conn, user, "droits.reinitialisation")
+    return {"ok": True}
+
+
+@app.post("/api/users/{user_id}/impersonate")
+def impersonate(user_id: int, request: Request, response: Response, user=Depends(require("impersonate"))):
+    """Ouvre une session en lecture seule sur le compte d'un autre utilisateur (2 h)."""
+    if user.get("_impersonator"):
+        raise HTTPException(400, "Revenez d'abord à votre compte.")
+    t = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+    if t is None or not t["active"]:
+        raise HTTPException(404, "Compte introuvable ou désactivé")
+    if t["id"] == user["id"]:
+        raise HTTPException(400, "C'est déjà votre compte.")
+    if t["role"] == "admin":
+        raise HTTPException(400, "Impossible de se connecter en tant qu'un autre administrateur.")
+    mine = request.cookies.get(auth.COOKIE) or ""
+    token = auth.create_session(conn, t["id"], impersonator=user["id"], return_token=mine)
+    _set_cookie(response, token)
+    db.audit(conn, user, "compte.connexion_en_tant_que", None, {"compte": t["username"]})
+    return {"ok": True}
+
+
+@app.post("/api/auth/impersonate/stop")
+def impersonate_stop(request: Request, response: Response, user=Depends(current_user)):
+    token = request.cookies.get(auth.COOKIE)
+    r = conn.execute("SELECT return_token, impersonator_id FROM sessions WHERE token=?", (token,)).fetchone()
+    if not r or not r["impersonator_id"]:
+        raise HTTPException(400, "Aucune connexion « en tant que » en cours")
+    with db.tx(conn):
+        conn.execute("DELETE FROM sessions WHERE token=?", (token,))
+    back = conn.execute("SELECT 1 FROM sessions WHERE token=? AND expires_at > datetime('now')", (r["return_token"],)).fetchone()
+    if back:
+        _set_cookie(response, r["return_token"])
+    else:
+        response.delete_cookie(auth.COOKIE, path="/")
+    db.audit(conn, {"username": user["_impersonator"]["username"]}, "compte.fin_connexion_en_tant_que", None,
+             {"compte": user["username"]})
+    return {"ok": True, "relogin": not back}
+
+
+@app.post("/api/export/xlsx")
+def export_table(body: dict = Body(...), user=Depends(current_user)):
+    """Met en forme un tableau affiché à l'écran (colonnes + lignes) en classeur Excel."""
+    data = export.table_xlsx(str(body.get("title") or "Export")[:31], body.get("columns") or [], body.get("rows") or [])
+    name = re.sub(r"[^\w.-]+", "_", str(body.get("filename") or "export")) + ".xlsx"
+    return Response(data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 @app.post("/api/users")
@@ -205,7 +287,7 @@ def _public_settings() -> dict:
 
 
 @app.put("/api/settings")
-def put_settings(values: dict = Body(...), user=USERS):
+def put_settings(values: dict = Body(...), user=SETTINGS):
     with db.tx(conn):
         for k, v in values.items():
             if k.startswith("ai_"):
@@ -240,12 +322,12 @@ def _ai_key(provider: str, body: dict) -> str:
 
 
 @app.get("/api/ai")
-def ai_get(user=USERS):
+def ai_get(user=SETTINGS):
     return _ai_state()
 
 
 @app.put("/api/ai")
-def ai_put(body: dict = Body(...), user=USERS):
+def ai_put(body: dict = Body(...), user=SETTINGS):
     provider = (body.get("provider") or "").strip().lower()
     if provider not in ("", "off", *ai.PROVIDERS):
         raise HTTPException(400, "Fournisseur inconnu")
@@ -270,7 +352,7 @@ def ai_put(body: dict = Body(...), user=USERS):
 
 
 @app.post("/api/ai/models")
-def ai_models(body: dict = Body(...), user=USERS):
+def ai_models(body: dict = Body(...), user=SETTINGS):
     provider = (body.get("provider") or "").strip().lower()
     key = _ai_key(provider, body)
     try:
@@ -283,7 +365,7 @@ def ai_models(body: dict = Body(...), user=USERS):
 
 
 @app.post("/api/ai/test")
-def ai_test(body: dict = Body(...), user=USERS):
+def ai_test(body: dict = Body(...), user=SETTINGS):
     provider = (body.get("provider") or "").strip().lower()
     key = _ai_key(provider, body)
     cfg = {"provider": provider, "key": key, "model": (body.get("model") or "").strip(), "effort": (body.get("effort") or "").strip()}
@@ -666,7 +748,7 @@ def ref_delete(table: str, ident: str, user=REF):
 
 
 @app.post("/api/import/facturation")
-async def import_facturation(file: UploadFile = File(...), user=USERS):
+async def import_facturation(file: UploadFile = File(...), user=SETTINGS):
     rep = importers.import_facturation_workbook(conn, await file.read(), with_entries=False)
     rep["months"] = sorted(rep["months"])
     db.audit(conn, user, "referentiel.import_excel", None, {"salaries": rep["collaborators"], "projets": rep["projects"]})
@@ -676,7 +758,7 @@ async def import_facturation(file: UploadFile = File(...), user=USERS):
 @app.post("/api/import/bootstrap")
 async def import_bootstrap(facturation: UploadFile = File(...), charges: UploadFile = File(...),
                            timesheet: UploadFile | None = File(None), history_from: str = Form("2025-01"),
-                           user=USERS):
+                           user=SETTINGS):
     """Reprise complète de l'existant depuis les trois classeurs Excel (rejouable)."""
     import io
     _month(history_from)
@@ -692,9 +774,9 @@ async def import_bootstrap(facturation: UploadFile = File(...), charges: UploadF
 
 
 @app.get("/api/analytics")
-def analytics_data(user=VIEW):
+def analytics_data(user=ANALYTICS):
     data = analytics.build(conn)
-    if not auth.has(user, "costs"):     # heures individuelles : rôles Finance / Admin seulement
+    if not auth.has(user, "analytics.people"):     # heures et coûts individuels
         data["team"] = []
         for l in data["lots"]:
             l["team"] = []
@@ -702,7 +784,7 @@ def analytics_data(user=VIEW):
 
 
 @app.get("/api/audit")
-def audit_list(limit: int = 300, user=USERS):
+def audit_list(limit: int = 300, user=AUDIT):
     return db.rows(conn, "SELECT * FROM audit ORDER BY id DESC LIMIT ?", (min(limit, 2000),))
 
 

@@ -10,14 +10,14 @@ import * as analytics from "./pages/analytics.js";
 const ROUTES = {
   "tableau-de-bord": { title: "Tableau de bord", icon: "home", perm: "view", page: dashboard },
   mois: { title: "Facture du mois", icon: "invoice", perm: "view", page: monthPage },
-  analyse: { title: "Analyse", icon: "pie", perm: "view", page: analytics },
+  analyse: { title: "Analyse", icon: "pie", perm: "analytics", page: analytics },
   "mes-temps": { title: "Temps", icon: "clock", perm: "time.self", page: mytime },
   projets: { title: "Projets", icon: "folder", perm: "view", page: refs, arg: "projects", group: "Référentiels" },
   epics: { title: "Epics Jira", icon: "tag", perm: "view", page: refs, arg: "epics", group: "Référentiels" },
   collaborateurs: { title: "Collaborateurs", icon: "users", perm: "view", page: refs, arg: "collaborators", group: "Référentiels" },
   comptes: { title: "Comptes & droits", icon: "shield", perm: "users", page: admin, arg: "users", group: "Administration" },
-  journal: { title: "Journal", icon: "history", perm: "users", page: admin, arg: "audit", group: "Administration" },
-  parametres: { title: "Paramètres", icon: "settings", perm: "users", page: admin, arg: "settings", group: "Administration" },
+  journal: { title: "Journal", icon: "history", perm: "audit", page: admin, arg: "audit", group: "Administration" },
+  parametres: { title: "Paramètres", icon: "settings", perm: "settings", page: admin, arg: "settings", group: "Administration" },
 };
 const defaultRoute = () => (can("view") ? "tableau-de-bord" : "mes-temps");
 
@@ -43,7 +43,7 @@ async function boot() {
   renderShell();
   if (!location.hash || location.hash === "#") location.hash = "#/" + defaultRoute();
   else route();
-  if (S.user.must_change) setTimeout(changePassword, 400);
+  if (S.user.must_change && !S.user.impersonated_by) setTimeout(changePassword, 400);
 }
 window.addEventListener("auth:lost", () => { S.user = null; toast("Session expirée : reconnectez-vous.", "warning"); renderLogin(); });
 
@@ -125,7 +125,7 @@ function renderShell() {
     can("view") && ["tableau-de-bord", "home", "Accueil"],
     can("view") && ["mois", "invoice", "Facture"],
     ["mes-temps", "clock", can("time.all") ? "Temps" : "Mes temps"],
-    can("view") && ["analyse", "pie", "Analyse"],
+    can("analytics") && ["analyse", "pie", "Analyse"],
   ].filter(Boolean);
   document.body.innerHTML = `<div class="shell" id="shell">
     <aside class="side" aria-label="Navigation">
@@ -136,6 +136,7 @@ function renderShell() {
     </aside>
     <div class="side-scrim" id="scrim"></div>
     <div class="main">
+      ${u.impersonated_by ? `<div class="imp-banner" role="status">${icon("eye")}<span class="grow">Vous voyez l'application comme <b>${esc(u.display_name)}</b> (${esc(u.role_label)}) · <b>lecture seule</b></span><button class="btn sm" id="impStop">${icon("logout")}Revenir au compte de ${esc(u.impersonated_by.display_name)}</button></div>` : ""}
       <header class="topbar"><button class="icon-btn" id="burger" aria-label="Menu">${icon("menu")}</button><div class="brand-logo">LF</div><div class="topbar-title" id="topTitle"></div>
         ${can("view") ? `<button class="icon-btn" id="openPalette2" aria-label="Rechercher">${icon("search")}</button>` : ""}<button class="icon-btn" id="meBtn2" aria-label="Mon compte">${avatar(u.display_name)}</button></header>
       <main class="content" id="view"></main>
@@ -146,10 +147,16 @@ function renderShell() {
   $("#burger").onclick = () => shell.classList.add("side-open");
   $("#scrim").onclick = () => shell.classList.remove("side-open");
   $$("#nav a").forEach((a) => a.addEventListener("click", () => shell.classList.remove("side-open")));
+  $("#impStop")?.addEventListener("click", stopImpersonation);
   $("#meBtn").onclick = userMenu; $("#meBtn2").onclick = userMenu;
   $("#openPalette")?.addEventListener("click", palette);
   $("#openPalette2")?.addEventListener("click", palette);
   updateNavBadge();
+}
+
+export async function stopImpersonation() {
+  const r = await api("/api/auth/impersonate/stop", { method: "POST" });
+  location.hash = r.relogin ? "" : "#/comptes"; location.reload();
 }
 
 export function updateNavBadge() {
