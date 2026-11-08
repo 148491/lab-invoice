@@ -22,7 +22,7 @@ const CFG = {
   },
   epics: {
     title: "Epics Jira", sub: "Correspondance entre chaque epic Jira et le lot facturé (ex-onglet Roadmap). Mis à jour à chaque import du timesheet.", pk: "epic_key",
-    help: "Les catégories <b>Agile, Support et CX</b> produisent un lot mensuel « NOM - MM/AA ».",
+    help: "Le lot facturé est mensuel (« NOM - MM/AA ») quand son nom contient un mot-clé des lots mensuels (MINOR EVOLUTION, BUG, activités de run) : voir Paramètres.",
     cols: [["label", "Epic"], ["lot_name", "Lot facturé"], ["category", "Catégorie"], ["status", "Statut"], ["mel_date", "Mise en ligne"]],
     filters: [["", "Toutes"], ["IN PROGRESS", "En cours"], ["PRODUCTION", "En ligne"]],
     form: (r = {}) => [

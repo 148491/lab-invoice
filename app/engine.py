@@ -122,7 +122,7 @@ def compute(conn, month: str) -> dict:
     s = db.settings(conn)
     params = db.get_month(conn, month)
     hpd = float(s.get("hours_per_day") or 7)
-    recurring = set(json.loads(s.get("recurring_categories") or "[]"))
+    monthly = lambda name: db.monthly_kind(name, s)  # noqa: E731
     wd = params["working_days"] if params["working_days"] is not None else working_days(month)
     first, last = month_first(month), month_last(month)
     suffix = month_suffix(month)
@@ -164,11 +164,11 @@ def compute(conn, month: str) -> dict:
                 if ep is None:
                     unknown_epic[str(e["epic"]).strip()].append(e)
                 else:
-                    lot = ep["lot_name"] + (f" - {suffix}" if ep["category"] in recurring else "")
+                    lot = ep["lot_name"] + (f" - {suffix}" if monthly(ep["lot_name"]) else "")
         if ep is None and e["epic"] and not is_no_epic(e["epic"]):
             ep = epics.get(epic_key(e["epic"]))
         if ep is not None:
-            cat, sub = ep["category"] or "", ep["sub_category"] or ""
+            cat, sub = monthly(ep["lot_name"]) or ep["category"] or "", ep["sub_category"] or ""
         proj = projects.get(lot.casefold()) if lot else None
         if proj is not None and not cat:
             cat, sub = proj["category"] or "", proj["sub_category"] or ""
@@ -323,7 +323,7 @@ def compute(conn, month: str) -> dict:
     for L in lots.values():
         if abs(L["cost"]) < 0.005:
             continue
-        is_rec = L["category"] in recurring or L["lot"].endswith(f" - {suffix}")
+        is_rec = L["lot"].endswith(f" - {suffix}")
         proj = projects.get(L["lot"].casefold())
         if is_rec:
             status, mel = "PRODUCTION", last.isoformat()

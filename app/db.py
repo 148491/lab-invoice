@@ -151,10 +151,28 @@ DEFAULT_SETTINGS = {
     "currency": "ILS",
     "hours_per_day": "7",
     "default_cost_plus": "0.07",
-    # Catégories d'epics dont le lot est mensuel : « NOM - MM/YY »
-    "recurring_categories": json.dumps(["Agile", "Support", "CX"]),
+    # Lots mensuels « NOM - MM/YY » : déterminés par le nom de l'epic (JIRA NAME).
+    # Chaque type liste des mots-clés ; un nom qui en contient un est facturé mois par mois.
+    "monthly_keywords": json.dumps({
+        "Agile": ["MINOR EVOLUTION"],
+        "Support": ["BUG"],
+        "Run": ["REUNIONS & PILOTAGE", "INFRA & SERVICES", "CI/CD", "DOCUMENTATION", "CX - RUN", "FASTERIZE"],
+    }, ensure_ascii=False),
     "expected_tolerance": "0.2",
 }
+
+
+def monthly_kind(name: str | None, settings_: dict) -> str | None:
+    """Type de lot mensuel (« Agile », « Support », « Run »…) d'après le nom, ou None pour un projet."""
+    try:
+        rules = json.loads(settings_.get("monthly_keywords") or "{}")
+    except ValueError:
+        rules = {}
+    up = (name or "").upper()
+    for kind, words in rules.items():
+        if any(w.strip() and w.strip().upper() in up for w in words):
+            return kind
+    return None
 
 
 def connect(path: Path | str | None = None) -> sqlite3.Connection:
@@ -190,6 +208,7 @@ def init(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     for k, v in DEFAULT_SETTINGS.items():
         conn.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (k, v))
+    conn.execute("DELETE FROM settings WHERE key = 'recurring_categories'")
     conn.commit()
 
 

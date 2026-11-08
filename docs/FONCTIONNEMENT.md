@@ -32,9 +32,20 @@ au centime** pour 19 factures sur 21 (janvier 2025 → septembre 2026) ; les
 * **Onglet `Roadmap_Project_Names`** : référentiel des epics. Pour chaque epic
   (`EPICS-194: SILO PAGES 2026`) : nom du lot facturé (`JIRA NAME`), statut,
   date de mise en ligne, sous-catégorie, catégorie.
-* **Lot d'une ligne** = nom du lot de son epic. Pour les catégories
-  **Agile, Support et CX** (maintenance récurrente), le lot est mensuel :
-  `NOM - MM/YY` (ex. `CSE - BUG FIXES - 10/26`).
+* **Lot d'une ligne** = nom du lot de son epic (colonne `JIRA NAME`). Le lot est **mensuel**
+  (`NOM - MM/YY`, ex. `CSE - BUG FIXES - 10/26`) quand ce nom contient un mot-clé :
+  - `MINOR EVOLUTION` → évolutions mineures (Agile) ;
+  - `BUG` (BUG FIXES, BUGS FIX, BUGS MANAGEMENT…) → support ;
+  - activités récurrentes (run) : `REUNIONS & PILOTAGE`, `INFRA & SERVICES`, `CI/CD`,
+    `DOCUMENTATION`, `CX - RUN`, `FASTERIZE`.
+
+  Toutes les autres epics sont des projets : une seule ligne jusqu'à leur mise en ligne.
+  La règle ne dépend que des noms (et plus de la colonne « Catégorie » de la Roadmap), ce qui
+  permettra de lire les temps directement dans Jira. Mots-clés modifiables dans Paramètres.
+  Constat sur l'historique : 109 des 134 lots mensuels facturés depuis 2018 contiennent
+  `MINOR EVOLUTION` ou `BUG`, et tous les noms contenant ces mots ont été facturés au mois ; les
+  autres lots mensuels sont les activités de run ci-dessus, plus quelques exceptions anciennes
+  (contrats CRO 2020-2022, hébergement 2018, CMS V3 2023).
 * **CTO** : pas de saisie. Son total d'heures = (jours ouvrés − absences) × 7
   est réparti sur les lots **au prorata des heures Jira de l'équipe**
   (feuille `Time_Tracking_Summary_<prénom>`).

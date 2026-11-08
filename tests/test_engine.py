@@ -253,3 +253,14 @@ def test_real_september_2026_matches_excel(tmp_path):
         calc = {l["lot"]: l["salary"] for l in res["invoice"]["lines"]}
         for lot, v in exp["expected_lines"].items():
             assert calc[lot] == pytest.approx(v, abs=0.01), lot
+
+
+def test_monthly_lots_by_name():
+    s = {"monthly_keywords": db.DEFAULT_SETTINGS["monthly_keywords"]}
+    assert db.monthly_kind("CSE - MINOR EVOLUTIONS", s) == "Agile"
+    assert db.monthly_kind("CSE - BUG FIXES", s) == "Support"
+    assert db.monthly_kind("IRESA - BUGS MANAGEMENT", s) == "Support"
+    assert db.monthly_kind("CX - REUNIONS & PILOTAGE", s) == "Run"
+    assert db.monthly_kind("FASTERIZE", s) == "Run"
+    assert db.monthly_kind("CX - DIGITRIPS", s) is None
+    assert db.monthly_kind("SILO PAGES 2026", s) is None

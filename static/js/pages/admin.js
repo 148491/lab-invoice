@@ -94,11 +94,19 @@ async function audit(view) {
 
 async function settings(view) {
   const st = await api("/api/settings");
-  const F = [["issuer_name", "Émetteur de la facture"], ["issuer_footer", "Pied de facture", true], ["client_name", "Client"], ["client_address", "Adresse du client", true], ["client_id", "Identifiant client"], ["client_ref", "Référence client"], ["currency", "Devise"], ["hours_per_day", "Heures par jour"], ["default_cost_plus", "Cost + par défaut (ex. 0.07)"], ["expected_tolerance", "Tolérance sur les heures (ex. 0.2 = ±20 %)"], ["recurring_categories", "Catégories à lot mensuel (JSON)"]];
+  const F = [["issuer_name", "Émetteur de la facture"], ["issuer_footer", "Pied de facture", true], ["client_name", "Client"], ["client_address", "Adresse du client", true], ["client_id", "Identifiant client"], ["client_ref", "Référence client"], ["currency", "Devise"], ["hours_per_day", "Heures par jour"], ["default_cost_plus", "Cost + par défaut (ex. 0.07)"], ["expected_tolerance", "Tolérance sur les heures (ex. 0.2 = ±20 %)"]];
+  let rules = {};
+  try { rules = JSON.parse(st.monthly_keywords || "{}"); } catch (_) { /* */ }
+  const KINDS = [["Agile", "Évolutions mineures (Agile)"], ["Support", "Bug fixes (Support)"], ["Run", "Run / activités récurrentes"]];
   view.innerHTML = `<div class="page-head"><div class="grow"><div class="crumbs">${icon("shield")}Administration</div><h1>Paramètres</h1></div></div>
-  <div class="grid g-side"><div class="card"><div class="card-head"><h2>Facture et calcul</h2></div><form class="card-body form-grid" id="sf" onsubmit="return false">
+  <div class="grid g-side"><div class="stack"><div class="card"><div class="card-head"><h2>Facture et calcul</h2></div><form class="card-body form-grid" id="sf" onsubmit="return false">
     ${F.map(([k, l, area]) => field({ name: k, label: l, value: st[k], type: area ? "textarea" : "text", rows: 2, full: !!area }))}</form>
     <div class="card-foot"><button class="btn primary" id="save">Enregistrer</button></div></div>
+    <div class="card"><div class="card-head"><div class="grow"><h2>Lots facturés au mois</h2><div class="desc">Une epic dont le nom (JIRA NAME) contient l'un de ces mots est facturée mois par mois : « CSE - BUG FIXES » devient « CSE - BUG FIXES - 10/26 », livré en fin de mois. Toutes les autres epics sont des projets : une seule ligne jusqu'à leur mise en ligne.</div></div></div>
+      <form class="card-body stack" id="mk" style="gap:12px" onsubmit="return false">
+        ${KINDS.map(([k, l]) => field({ name: k, label: l, value: (rules[k] || []).join(", "), help: "Mots-clés séparés par des virgules, majuscules ou minuscules indifférentes." })).join("")}
+        <p class="xs faint" style="margin:0">Tiré de l'historique : 109 des 134 lots mensuels depuis 2018 contiennent « MINOR EVOLUTION » ou « BUG » ; les autres sont des activités récurrentes de l'équipe CX et FASTERIZE.</p></form>
+      <div class="card-foot"><button class="btn primary" id="saveMk">Enregistrer</button></div></div></div>
   <div class="stack"><div class="card" id="reprise"><div class="card-head"><div class="grow"><h2>Reprise des fichiers Excel</h2><div class="desc">Charge salariés, projets, epics, charges et l'historique des factures, puis recalcule chaque mois pour le comparer à vos factures Excel.</div></div></div>
       <div class="card-body stack" style="gap:10px">
         ${[["facturation", "Facturation Paris", true], ["charges", "Charge Patronale - BDD", true], ["timesheet", "Timesheet du dernier mois (facultatif)", false]].map(([k, l, req]) => `<label class="drop" style="padding:12px;text-align:left;display:flex;gap:12px;align-items:center" data-k="${k}"><span class="drop-ic" style="margin:0;width:36px;height:36px">${icon("file")}</span><span class="grow" style="flex:1;min-width:0"><span class="drop-title" style="font-size:13.5px">${l}${req ? ' <span class="req">*</span>' : ""}</span><span class="drop-sub ellipsis" style="display:block" data-name>Choisir le fichier .xlsx</span></span><input type="file" accept=".xlsx,.xlsm" hidden></label>`).join("")}
@@ -107,6 +115,12 @@ async function settings(view) {
         <p class="xs faint" style="margin:0">Rejouable : l'historique repris est remplacé ; comptes, saisies et mois en cours sont conservés.</p></div></div>
     <div class="card card-pad"><h3>Assistant IA</h3><p class="small ${S.ai ? "" : "muted"}" style="margin:0">${S.ai ? `${icon("sparkles")} Actif : les noms inconnus sont rapprochés par Claude en plus de l'algorithme local.` : "Inactif. Définissez la variable ANTHROPIC_API_KEY sur le serveur pour l'activer ; le rapprochement local (orthographe, ordre des mots, initiales, translittération) fonctionne sans."}</p></div>
     <div class="card card-pad"><h3>Version 2 — Jira</h3><p class="small muted" style="margin:0">L'import des temps est isolé : il pourra lire directement les worklogs Jira (projets MC et RD10) au lieu du fichier.</p></div></div></div>`;
+  $("#saveMk", view).onclick = async () => {
+    const data = Object.fromEntries(new FormData($("#mk", view)));
+    const out = Object.fromEntries(Object.entries(data).map(([k, v]) => [k, v.split(",").map((x) => x.trim()).filter(Boolean)]));
+    S.settings = await api("/api/settings", { method: "PUT", json: { monthly_keywords: JSON.stringify(out) } });
+    toast("Règles des lots mensuels enregistrées", "success");
+  };
   $("#save", view).onclick = async () => { S.settings = await api("/api/settings", { method: "PUT", json: Object.fromEntries(new FormData($("#sf", view))) }); toast("Paramètres enregistrés", "success"); };
   const files = {};
   const run = $("#runReprise", view);

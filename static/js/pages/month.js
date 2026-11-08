@@ -379,10 +379,11 @@ async function doAction(act, i, m) {
   if (act === "assign") {
     let lot = await lotPicker(`Affecter ${i.details.length} ligne(s) à un lot`, i.lot || "");
     if (!lot) return;
-    const ep = (await api("/api/ref/epics")).find((e) => e.lot_name === lot);
-    const rec = JSON.parse(S.settings.recurring_categories || "[]");
+    let rules = {};
+    try { rules = JSON.parse(S.settings.monthly_keywords || "{}"); } catch (_) { /* */ }
+    const isMonthly = Object.values(rules).flat().some((w) => w && lot.toUpperCase().includes(w.toUpperCase()));
     const sfx = `${m.slice(5)}/${m.slice(2, 4)}`;
-    if (ep && rec.includes(ep.category) && !lot.endsWith(sfx)) lot = `${lot} - ${sfx}`;
+    if (isMonthly && !/ - \d{2}\/\d{2}$/.test(lot)) lot = `${lot} - ${sfx}`;
     await api("/api/entries/bulk-lot", { method: "POST", json: { ids: i.details.map((x) => x.id), lot } });
     toast(`Lignes affectées à « ${lot} »`, "success"); return rerender();
   }
@@ -390,7 +391,7 @@ async function doAction(act, i, m) {
     const r = await formDialog("Ajouter l'epic au référentiel", [
       { name: "label", label: "Epic", value: i.epic, required: true, full: true },
       { name: "lot_name", label: "Lot facturé (JIRA NAME)", value: i.epic.replace(/^[A-Z0-9]+-\d+:\s*/, ""), required: true, full: true },
-      { name: "category", label: "Catégorie", type: "select", options: ["Project", "Agile", "Support", "CX", "Innovation Forum", "CRO", "BI"], value: "Project", help: "Agile, Support et CX donnent un lot mensuel « NOM - MM/AA »." },
+      { name: "category", label: "Catégorie", type: "select", options: ["Project", "Agile", "Support", "CX", "Innovation Forum", "CRO", "BI"], value: "Project", help: "Le caractère mensuel du lot dépend de son nom (Paramètres › Lots facturés au mois)." },
       { name: "status", label: "Statut", type: "select", options: [["IN PROGRESS", "En cours"], ["PRODUCTION", "En ligne"]], value: "IN PROGRESS" },
     ], { ok: "Ajouter" });
     if (!r) return;
