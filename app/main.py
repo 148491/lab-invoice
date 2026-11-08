@@ -24,6 +24,7 @@ app = FastAPI(title="Lab Facturation", docs_url=None, redoc_url=None)
 conn = db.ThreadLocalConnection()
 db.init(conn)
 current_user, require = auth.make_dependencies(lambda: conn)
+ai.settings_getter = lambda: db.settings(conn)
 
 
 def _emergency_admin_reset() -> None:
@@ -195,17 +196,107 @@ def users_upsert(body: dict = Body(...), user=USERS):
 # ================================================================== réglages
 @app.get("/api/settings")
 def get_settings(user=Depends(current_user)):
-    return db.settings(conn)
+    return _public_settings()
+
+
+def _public_settings() -> dict:
+    """Réglages sans les clés d'API (jamais renvoyées au navigateur)."""
+    return {k: v for k, v in db.settings(conn).items() if not k.startswith("ai_key_")}
 
 
 @app.put("/api/settings")
 def put_settings(values: dict = Body(...), user=USERS):
     with db.tx(conn):
         for k, v in values.items():
+            if k.startswith("ai_"):
+                continue      # réglages IA : endpoint dédié
             conn.execute("INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                          (k, v if isinstance(v, str) else json.dumps(v)))
     db.audit(conn, user, "parametres")
-    return db.settings(conn)
+    return _public_settings()
+
+
+# ================================================================== assistant IA
+def _ai_state() -> dict:
+    s = db.settings(conn)
+    keys = {}
+    for p in ai.PROVIDERS:
+        k, origin = ai.key_info(p, s)
+        keys[p] = {"origin": origin, "hint": f"…{k[-4:]}" if k else ""}
+    c = ai.config(s)
+    return {"provider": s.get("ai_provider") or "", "model": s.get("ai_model") or "", "effort": s.get("ai_effort") or "",
+            "active": c["provider"], "label": ai.label(), "keys": keys,
+            "providers": {p: {"label": v["label"], "efforts": v["efforts"], "default_model": v["default_model"]}
+                          for p, v in ai.PROVIDERS.items()}}
+
+
+def _ai_key(provider: str, body: dict) -> str:
+    if provider not in ai.PROVIDERS:
+        raise HTTPException(400, "Fournisseur inconnu")
+    k = (body.get("key") or "").strip() or ai.key_info(provider)[0]
+    if not k:
+        raise HTTPException(400, "Aucune clé d'API pour ce fournisseur : saisissez-la d'abord.")
+    return k
+
+
+@app.get("/api/ai")
+def ai_get(user=USERS):
+    return _ai_state()
+
+
+@app.put("/api/ai")
+def ai_put(body: dict = Body(...), user=USERS):
+    provider = (body.get("provider") or "").strip().lower()
+    if provider not in ("", "off", *ai.PROVIDERS):
+        raise HTTPException(400, "Fournisseur inconnu")
+    effort = (body.get("effort") or "").strip()
+    if effort and provider in ai.PROVIDERS and effort not in ai.PROVIDERS[provider]["efforts"]:
+        raise HTTPException(400, "Niveau de raisonnement non pris en charge par ce fournisseur")
+    with db.tx(conn):
+        def put(k, v):
+            conn.execute("INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (k, v))
+        put("ai_provider", provider)
+        put("ai_model", (body.get("model") or "").strip())
+        put("ai_effort", effort)
+        for p, k in (body.get("keys") or {}).items():
+            if p in ai.PROVIDERS and k is not None:
+                if k == "":
+                    conn.execute("DELETE FROM settings WHERE key=?", (f"ai_key_{p}",))
+                else:
+                    put(f"ai_key_{p}", k.strip())
+    db.audit(conn, user, "parametres.ia", None, {"fournisseur": provider, "modele": body.get("model"), "raisonnement": effort,
+                                                 "cles_modifiees": sorted((body.get("keys") or {}).keys())})
+    return _ai_state()
+
+
+@app.post("/api/ai/models")
+def ai_models(body: dict = Body(...), user=USERS):
+    provider = (body.get("provider") or "").strip().lower()
+    key = _ai_key(provider, body)
+    try:
+        models = ai.list_models(provider, key)
+    except Exception as e:
+        status = getattr(getattr(e, "response", None), "status_code", None) or getattr(e, "status_code", None)
+        msg = "Clé refusée par le fournisseur" if status in (401, 403) else f"Impossible de lire les modèles : {e}"
+        raise HTTPException(400, msg)
+    return {"provider": provider, "models": models}
+
+
+@app.post("/api/ai/test")
+def ai_test(body: dict = Body(...), user=USERS):
+    provider = (body.get("provider") or "").strip().lower()
+    key = _ai_key(provider, body)
+    cfg = {"provider": provider, "key": key, "model": (body.get("model") or "").strip(), "effort": (body.get("effort") or "").strip()}
+    try:
+        return ai.test(cfg)
+    except Exception as e:
+        status = getattr(getattr(e, "response", None), "status_code", None) or getattr(e, "status_code", None)
+        detail = ""
+        try:
+            detail = e.response.json().get("error", {}).get("message", "")  # type: ignore[union-attr]
+        except Exception:
+            detail = str(e)[:300]
+        return {"ok": False, "status": status, "error": detail or str(e)[:300]}
 
 
 # ================================================================== mois

@@ -266,27 +266,66 @@ def test_monthly_lots_by_name():
     assert db.monthly_kind("SILO PAGES 2026", s) is None
 
 
-def test_ai_openai_provider(monkeypatch):
+
+def _ai_reply(provider, payload):
+    import httpx
+    content = json.dumps(payload)
+    if provider == "openai":
+        return httpx.Response(200, json={"choices": [{"message": {"content": content, "refusal": None}}]})
+    if provider == "google":
+        return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": content}]}}]})
+    return httpx.Response(200, json={"id": "msg_1", "type": "message", "role": "assistant", "model": "m",
+                                      "content": [{"type": "text", "text": content}], "stop_reason": "end_turn",
+                                      "usage": {"input_tokens": 1, "output_tokens": 1}})
+
+
+@pytest.mark.parametrize("provider", ["openai", "google", "anthropic"])
+def test_ai_providers(monkeypatch, provider):
     import httpx
     from app import ai
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setenv("OPENAI_API_KEY", "test")
-    seen = {}
+    seen = []
+    answer = {"matches": [
+        {"input": "jerome.martin", "match": "Jérôme Martin", "confidence": 0.95, "reason": "identifiant"},
+        {"input": "Pirate", "match": "Pas dans la liste", "confidence": 0.9, "reason": "invention"}]}
 
     def handler(request):
-        seen["auth"] = request.headers["Authorization"]
-        seen["body"] = json.loads(request.content)
-        content = json.dumps({"matches": [
-            {"input": "jerome.martin", "match": "Jérôme Martin", "confidence": 0.95, "reason": "identifiant"},
-            {"input": "Inconnu", "match": None, "confidence": 0.1, "reason": "aucun"},
-            {"input": "Pirate", "match": "Pas dans la liste", "confidence": 0.9, "reason": "invention"}]})
-        return httpx.Response(200, json={"choices": [{"message": {"content": content, "refusal": None}}]})
+        body = json.loads(request.content) if request.content else {}
+        seen.append((request.url.path, body))
+        # le niveau de raisonnement est refusé : l'appel doit être rejoué sans lui
+        if "reasoning_effort" in body or "thinkingConfig" in body.get("generationConfig", {}) \
+                or body.get("output_config", {}).get("effort"):
+            return httpx.Response(400, json={"error": {"type": "invalid_request_error", "message": "unsupported"}})
+        return _ai_reply(provider, answer)
 
-    assert ai.provider() == "openai"
-    out = ai.match_names(["jerome.martin", "Inconnu", "Pirate"], ["Jérôme Martin", "Marie Dupont"],
-                         transport=httpx.MockTransport(handler))
+    def mock(h):
+        if provider == "anthropic":   # le SDK Anthropic peut utiliser httpx2 selon sa version
+            try:
+                import httpx2
+                return monkeypatch.setattr(ai, "anthropic_transport", httpx2.MockTransport(
+                    lambda r: _as(httpx2, h(r))))
+            except ImportError:
+                return monkeypatch.setattr(ai, "anthropic_transport", httpx.MockTransport(h))
+        monkeypatch.setattr(ai, "transport", httpx.MockTransport(h))
+
+    mock(handler)
+    cfg = {"provider": provider, "key": "k", "model": "mon-modele", "effort": "high"}
+    out = ai.match_names(["jerome.martin", "Pirate"], ["Jérôme Martin", "Marie Dupont"], cfg=cfg)
     assert out == {"jerome.martin": {"name": "Jérôme Martin", "score": 0.95, "reason": "IA : identifiant"}}
-    assert seen["auth"] == "Bearer test"
-    assert seen["body"]["response_format"]["json_schema"]["strict"] is True
-    # erreur côté OpenAI : pas d'exception, simple retour au rapprochement local
-    assert ai.match_names(["x"], ["y"], transport=httpx.MockTransport(lambda r: httpx.Response(401))) == {}
+    assert len(seen) >= 2 and "mon-modele" in json.dumps(seen)
+    # erreur fournisseur : pas d'exception, retour au rapprochement local
+    mock(lambda r: httpx.Response(401, json={"error": {"message": "bad key"}}))
+    assert ai.match_names(["x"], ["y"], cfg=cfg) == {}
+
+
+def _as(mod, resp):
+    """Convertit une réponse httpx en réponse du module HTTP du SDK."""
+    return mod.Response(resp.status_code, content=resp.content, headers={"content-type": "application/json"})
+
+
+def test_ai_list_models_filters(monkeypatch):
+    import httpx
+    from app import ai
+    data = {"data": [{"id": "gpt-6.1", "created": 3}, {"id": "gpt-6", "created": 2}, {"id": "text-embedding-3", "created": 9},
+                     {"id": "whisper-1", "created": 1}, {"id": "o5-mini", "created": 4}, {"id": "gpt-6-realtime", "created": 5}]}
+    monkeypatch.setattr(ai, "transport", httpx.MockTransport(lambda r: httpx.Response(200, json=data)))
+    assert [m["id"] for m in ai.list_models("openai", "k")] == ["o5-mini", "gpt-6.1", "gpt-6"]

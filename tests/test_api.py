@@ -130,3 +130,17 @@ def test_bootstrap_from_excel_files(admin):
     months = {m["month"]: m for m in admin.get("/api/months").json()}
     assert months["2026-09"]["status"] == "validated" and months["2026-10"]["status"] == "draft"
     assert months["2026-09"]["total"] == pytest.approx(370695.2084, abs=0.01)
+
+
+def test_ai_settings_never_leak_keys(admin, monkeypatch):
+    for v in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"):
+        monkeypatch.delenv(v, raising=False)
+    st = admin.put("/api/ai", json={"provider": "openai", "model": "gpt-6.1", "effort": "high",
+                                    "keys": {"openai": "sk-secret-1234"}}).json()
+    assert st["active"] == "openai" and st["keys"]["openai"] == {"origin": "db", "hint": "…1234"}
+    assert "sk-secret" not in admin.get("/api/ai").text
+    assert "sk-secret" not in admin.get("/api/settings").text
+    assert admin.get("/api/auth/state").json()["ai_label"] == "OpenAI (gpt-6.1, raisonnement high)"
+    assert admin.put("/api/ai", json={"provider": "openai", "effort": "max"}).status_code == 400
+    st = admin.put("/api/ai", json={"provider": "off", "keys": {"openai": ""}}).json()
+    assert st["active"] is None and st["keys"]["openai"]["origin"] is None

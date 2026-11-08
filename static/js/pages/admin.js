@@ -1,5 +1,5 @@
 /* Administration : comptes & droits, journal, paramètres. */
-import { $, $$, S, api, esc, fmt, icon, chip, empty, modal, field, toast, avatar, dropzone, debounce } from "../core.js";
+import { $, $$, S, api, esc, fmt, icon, chip, empty, modal, field, toast, avatar, dropzone, debounce, confirmDialog } from "../core.js";
 import { rerender } from "../app.js";
 
 export async function render(view, { arg }) {
@@ -106,15 +106,16 @@ async function settings(view) {
       <form class="card-body stack" id="mk" style="gap:12px" onsubmit="return false">
         ${KINDS.map(([k, l]) => field({ name: k, label: l, value: (rules[k] || []).join(", "), help: "Mots-clés séparés par des virgules, majuscules ou minuscules indifférentes." })).join("")}
         <p class="xs faint" style="margin:0">Tiré de l'historique : 109 des 134 lots mensuels depuis 2018 contiennent « MINOR EVOLUTION » ou « BUG » ; les autres sont des activités récurrentes de l'équipe CX et FASTERIZE.</p></form>
-      <div class="card-foot"><button class="btn primary" id="saveMk">Enregistrer</button></div></div></div>
+      <div class="card-foot"><button class="btn primary" id="saveMk">Enregistrer</button></div></div>
+    <div class="card" id="aiCard"></div></div>
   <div class="stack"><div class="card" id="reprise"><div class="card-head"><div class="grow"><h2>Reprise des fichiers Excel</h2><div class="desc">Charge salariés, projets, epics, charges et l'historique des factures, puis recalcule chaque mois pour le comparer à vos factures Excel.</div></div></div>
       <div class="card-body stack" style="gap:10px">
         ${[["facturation", "Facturation Paris", true], ["charges", "Charge Patronale - BDD", true], ["timesheet", "Timesheet du dernier mois (facultatif)", false]].map(([k, l, req]) => `<label class="drop" style="padding:12px;text-align:left;display:flex;gap:12px;align-items:center" data-k="${k}"><span class="drop-ic" style="margin:0;width:36px;height:36px">${icon("file")}</span><span class="grow" style="flex:1;min-width:0"><span class="drop-title" style="font-size:13.5px">${l}${req ? ' <span class="req">*</span>' : ""}</span><span class="drop-sub ellipsis" style="display:block" data-name>Choisir le fichier .xlsx</span></span><input type="file" accept=".xlsx,.xlsm" hidden></label>`).join("")}
         <div class="row"><div class="field" style="flex:1"><label>Historique à partir de</label><input type="month" id="hf" value="2025-01"></div></div>
         <button class="btn primary" id="runReprise" disabled>${icon("zap")}Lancer la reprise</button>
         <p class="xs faint" style="margin:0">Rejouable : l'historique repris est remplacé ; comptes, saisies et mois en cours sont conservés.</p></div></div>
-    <div class="card card-pad"><h3>Assistant IA</h3><p class="small ${S.ai ? "" : "muted"}" style="margin:0">${S.ai ? `${icon("sparkles")} Actif — ${esc(S.aiLabel || "")} : les noms inconnus sont rapprochés par l'IA en plus de l'algorithme local.` : "Inactif. Définissez sur le serveur la variable OPENAI_API_KEY (clé OpenAI) ou ANTHROPIC_API_KEY (clé Claude) pour l'activer ; le rapprochement local (orthographe, ordre des mots, initiales, translittération) fonctionne sans."}</p></div>
     <div class="card card-pad"><h3>Version 2 — Jira</h3><p class="small muted" style="margin:0">L'import des temps est isolé : il pourra lire directement les worklogs Jira (projets MC et RD10) au lieu du fichier.</p></div></div></div>`;
+  aiModule($("#aiCard", view));
   $("#saveMk", view).onclick = async () => {
     const data = Object.fromEntries(new FormData($("#mk", view)));
     const out = Object.fromEntries(Object.entries(data).map(([k, v]) => [k, v.split(",").map((x) => x.trim()).filter(Boolean)]));
@@ -152,4 +153,95 @@ async function settings(view) {
         actions: [{ label: "Fermer", kind: "primary" }] });
     } finally { run.classList.remove("loading"); }
   };
+}
+
+
+// ------------------------------------------------------------------ assistant IA : fournisseur, modèle, raisonnement
+async function aiModule(card) {
+  const st = await api("/api/ai");
+  const EFFORT_LBL = { none: "Aucun", minimal: "Minimal", low: "Faible", medium: "Moyen", high: "Élevé", xhigh: "Très élevé", max: "Maximum" };
+  const ORDER = ["openai", "google", "anthropic"];
+  const state = { provider: st.provider && st.provider !== "off" ? st.provider : (st.active || ""), model: st.model, effort: st.effort, models: [], keyDraft: "" };
+  const keyLabel = (p) => { const k = st.keys[p] || {}; return k.origin === "db" ? `Clé enregistrée (${k.hint})` : k.origin ? `Fournie par le serveur (${k.origin}, ${k.hint})` : "Aucune clé"; };
+  const draw = () => {
+    const p = state.provider, info = st.providers[p];
+    card.innerHTML = `<div class="card-head"><div class="grow"><h2>Assistant IA</h2><div class="desc">Rapproche les noms de collaborateurs inconnus lors des imports. Seuls des noms sont envoyés, jamais de montants.</div></div>
+        ${st.active ? chip("Actif", "success", "sparkles") : chip("Inactif")}</div>
+      <div class="card-body stack" style="gap:14px">
+        ${st.active ? `<div class="small muted">En service : <b>${esc(st.label)}</b></div>` : ""}
+        <div class="field"><label>1. Fournisseur</label>
+          <div class="seg" role="tablist">${ORDER.map((k) => `<button type="button" data-p="${k}" class="${p === k ? "on" : ""}">${esc(st.providers[k].label)}</button>`).join("")}<button type="button" data-p="off" class="${p === "off" || !p ? "on" : ""}">Désactivé</button></div></div>
+        ${p && p !== "off" ? `
+        <div class="field"><label>Clé d'API ${esc(info.label)}</label>
+          <div class="row"><input id="aiKey" type="password" autocomplete="off" placeholder="${esc(keyLabel(p))} — collez une nouvelle clé pour la remplacer" style="flex:1">
+          ${st.keys[p]?.origin === "db" ? `<button class="btn sm ghost" id="aiDelKey" type="button">${icon("trash")}Supprimer</button>` : ""}</div>
+          <div class="help">${esc(keyLabel(p))}. La clé est stockée sur le serveur et n'est jamais réaffichée.</div></div>
+        <div class="field"><label>2. Modèle <span class="faint" id="aiCount"></span></label>
+          <div class="row"><select id="aiModel" style="flex:1"><option value="">${state.model ? esc(state.model) : `Par défaut (${esc(info.default_model)})`}</option></select>
+          <button class="btn sm" id="aiLoad" type="button">${icon("download")}Charger les modèles</button></div>
+          <div class="help">Liste lue en direct chez ${esc(info.label)} : les nouveaux modèles apparaissent sans mise à jour de l'application.</div></div>
+        <div class="field"><label>3. Niveau de raisonnement</label>
+          <select id="aiEffort"><option value="">Par défaut du modèle</option>${info.efforts.map((e) => `<option value="${e}" ${state.effort === e ? "selected" : ""}>${EFFORT_LBL[e] || e} (${e})</option>`).join("")}</select>
+          <div class="help">Plus élevé = plus réfléchi mais plus lent et plus cher. « Faible » suffit pour rapprocher des noms. Ignoré automatiquement si le modèle ne le prend pas en charge.</div></div>
+        <div id="aiResult"></div>` : `<p class="small muted" style="margin:0">L'IA est désactivée : le rapprochement local (orthographe, ordre des mots, initiales, translittération) reste actif.</p>`}
+      </div>
+      <div class="card-foot">${p && p !== "off" ? `<button class="btn" id="aiTest" type="button">${icon("zap")}Tester</button>` : ""}<button class="btn primary" id="aiSave" type="button">Enregistrer</button></div>`;
+
+    card.querySelectorAll("[data-p]").forEach((b) => (b.onclick = () => {
+      state.provider = b.dataset.p; state.models = []; state.keyDraft = "";
+      if (state.provider !== st.provider) { state.model = ""; state.effort = ""; }
+      else { state.model = st.model; state.effort = st.effort; }
+      draw();
+      if (state.provider !== "off" && st.keys[state.provider]?.origin) loadModels();
+    }));
+    const key = $("#aiKey", card), sel = $("#aiModel", card), eff = $("#aiEffort", card);
+    if (key) { key.value = state.keyDraft; key.oninput = () => (state.keyDraft = key.value.trim()); }
+    if (sel) { fillModels(); sel.onchange = () => (state.model = sel.value); }
+    if (eff) eff.onchange = () => (state.effort = eff.value);
+    $("#aiLoad", card)?.addEventListener("click", loadModels);
+    $("#aiDelKey", card)?.addEventListener("click", async () => {
+      if (!(await confirmDialog("Supprimer la clé ?", `La clé ${esc(st.providers[state.provider].label)} enregistrée sera effacée du serveur.`, { danger: true, ok: "Supprimer" }))) return;
+      Object.assign(st, await api("/api/ai", { method: "PUT", json: { provider: st.provider, model: st.model, effort: st.effort, keys: { [state.provider]: "" } } }));
+      toast("Clé supprimée", "success"); draw();
+    });
+    $("#aiTest", card)?.addEventListener("click", async (e) => {
+      const b = e.currentTarget; b.classList.add("loading");
+      try {
+        const r = await api("/api/ai/test", { method: "POST", json: { provider: state.provider, model: state.model, effort: state.effort, key: state.keyDraft } });
+        $("#aiResult", card).innerHTML = r.ok
+          ? `<div class="alert alert-success">${icon("check")}<div class="grow"><div class="alert-title">Ça fonctionne (${r.seconds} s)</div><div class="small">${Object.entries(r.matches).map(([k, v]) => `${esc(k)} → <b>${esc(v.name)}</b>`).join(" · ") || "Aucun rapprochement proposé"}</div></div></div>`
+          : `<div class="alert alert-danger">${icon("error")}<div class="grow"><div class="alert-title">Échec${r.status ? ` (${r.status})` : ""}</div><div class="small">${esc(r.error)}</div></div></div>`;
+      } finally { b.classList.remove("loading"); }
+    });
+    $("#aiSave", card).onclick = async (e) => {
+      const b = e.currentTarget; b.classList.add("loading");
+      try {
+        const body = { provider: state.provider || "off", model: state.model, effort: state.effort };
+        if (state.keyDraft) body.keys = { [state.provider]: state.keyDraft };
+        Object.assign(st, await api("/api/ai", { method: "PUT", json: body }));
+        state.keyDraft = ""; S.ai = !!st.active; S.aiLabel = st.label;
+        toast(st.active ? `IA active : ${st.label}` : "IA désactivée", "success"); draw();
+      } finally { b.classList.remove("loading"); }
+    };
+  };
+  const fillModels = () => {
+    const sel = $("#aiModel", card); if (!sel) return;
+    const info = st.providers[state.provider];
+    const list = state.models;
+    const known = list.some((m) => m.id === state.model);
+    sel.innerHTML = `<option value="">Par défaut (${esc(info.default_model)})</option>`
+      + (state.model && !known ? `<option value="${esc(state.model)}" selected>${esc(state.model)}</option>` : "")
+      + list.map((m) => `<option value="${esc(m.id)}" ${m.id === state.model ? "selected" : ""}>${esc(m.label === m.id ? m.id : `${m.label} — ${m.id}`)}</option>`).join("");
+    const c = $("#aiCount", card); if (c) c.textContent = list.length ? `· ${list.length} disponibles` : "";
+  };
+  const loadModels = async () => {
+    const b = $("#aiLoad", card); b?.classList.add("loading");
+    try {
+      const r = await api("/api/ai/models", { method: "POST", json: { provider: state.provider, key: state.keyDraft } });
+      state.models = r.models; fillModels();
+      toast(`${r.models.length} modèles ${st.providers[state.provider].label} chargés`, "success");
+    } finally { b?.classList.remove("loading"); }
+  };
+  draw();
+  if (state.provider && state.provider !== "off" && st.keys[state.provider]?.origin) loadModels().catch(() => {});
 }
