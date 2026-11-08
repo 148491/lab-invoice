@@ -13,7 +13,7 @@ from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Request, 
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import ai, auth, bootstrap, db, engine, export, importers, review, sheets
+from . import ai, analytics, auth, bootstrap, db, engine, export, importers, review, sheets
 from .names import Resolver
 
 STATIC = Path(__file__).resolve().parent.parent / "static"
@@ -689,6 +689,16 @@ async def import_bootstrap(facturation: UploadFile = File(...), charges: UploadF
     db.audit(conn, user, "reprise.excel", None, {"factures": len(rep["months"]), "lignes": rep["entries"]})
     rep["markdown"] = bootstrap.markdown(rep)
     return rep
+
+
+@app.get("/api/analytics")
+def analytics_data(user=VIEW):
+    data = analytics.build(conn)
+    if not auth.has(user, "costs"):     # heures individuelles : rôles Finance / Admin seulement
+        data["team"] = []
+        for l in data["lots"]:
+            l["team"] = []
+    return data
 
 
 @app.get("/api/audit")

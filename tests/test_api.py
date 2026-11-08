@@ -111,6 +111,12 @@ def test_full_month_flow_with_review(admin):
     assert ws["B12"].value == "NOUVEAU PROJET" and ws["E12"].value == pytest.approx(1800)
     assert c.get("/").status_code == 200
 
+    an = c.get("/api/analytics").json()
+    assert [x["m"] for x in an["months"]] == [m]
+    lot = next(x for x in an["lots"] if x["lot"] == "NOUVEAU PROJET")
+    assert lot["kind"] == "Projet" and lot["price"] == pytest.approx(1800) and lot["team"]
+    assert any(t["name"] == "Alice Dev" for t in an["team"])
+
 
 SAMPLES = __import__("pathlib").Path(__file__).resolve().parent.parent / "samples"
 

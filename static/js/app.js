@@ -5,10 +5,12 @@ import * as monthPage from "./pages/month.js";
 import * as mytime from "./pages/mytime.js";
 import * as refs from "./pages/refs.js";
 import * as admin from "./pages/admin.js";
+import * as analytics from "./pages/analytics.js";
 
 const ROUTES = {
   "tableau-de-bord": { title: "Tableau de bord", icon: "home", perm: "view", page: dashboard },
   mois: { title: "Facture du mois", icon: "invoice", perm: "view", page: monthPage },
+  analyse: { title: "Analyse", icon: "pie", perm: "view", page: analytics },
   "mes-temps": { title: "Temps", icon: "clock", perm: "time.self", page: mytime },
   projets: { title: "Projets", icon: "folder", perm: "view", page: refs, arg: "projects", group: "Référentiels" },
   epics: { title: "Epics Jira", icon: "tag", perm: "view", page: refs, arg: "epics", group: "Référentiels" },
@@ -123,7 +125,7 @@ function renderShell() {
     can("view") && ["tableau-de-bord", "home", "Accueil"],
     can("view") && ["mois", "invoice", "Facture"],
     ["mes-temps", "clock", can("time.all") ? "Temps" : "Mes temps"],
-    can("view") && ["projets", "folder", "Projets"],
+    can("view") && ["analyse", "pie", "Analyse"],
   ].filter(Boolean);
   document.body.innerHTML = `<div class="shell" id="shell">
     <aside class="side" aria-label="Navigation">
