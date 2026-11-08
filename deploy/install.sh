@@ -21,8 +21,9 @@ case "${ID:-}" in ubuntu|debian) ;; *) die "système non pris en charge (${PRETT
 
 say "Paquets système"
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -y -q
-apt-get install -y -q python3 python3-venv python3-pip git curl gnupg debian-keyring debian-archive-keyring apt-transport-https >/dev/null
+APT="apt-get -o DPkg::Lock::Timeout=600"
+$APT update -y -q
+$APT install -y -q python3 python3-venv python3-pip git curl gnupg debian-keyring debian-archive-keyring apt-transport-https >/dev/null
 python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' \
   || die "Python 3.10 ou plus requis (Ubuntu 22.04+ / Debian 12+)"
 
@@ -73,7 +74,7 @@ fi
 if ! command -v caddy >/dev/null; then
   curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/gpg.key | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
   curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt > /etc/apt/sources.list.d/caddy-stable.list
-  apt-get update -y -q && apt-get install -y -q caddy >/dev/null
+  $APT update -y -q && $APT install -y -q caddy >/dev/null
 fi
 SITE="${DOMAIN:-:80}"
 BLOCK="# lab-facturation
