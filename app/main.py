@@ -25,6 +25,31 @@ conn = db.ThreadLocalConnection()
 db.init(conn)
 current_user, require = auth.make_dependencies(lambda: conn)
 
+
+def _emergency_admin_reset() -> None:
+    """Secours « mot de passe administrateur oublié ».
+
+    Si la variable d'environnement FACTU_RESET_ADMIN_PASSWORD est définie au démarrage, tous les
+    comptes administrateurs reçoivent ce mot de passe (à changer à la connexion suivante) et sont
+    réactivés. Retirez la variable une fois la connexion rétablie.
+    """
+    pw = os.environ.get("FACTU_RESET_ADMIN_PASSWORD", "").strip()
+    if not pw:
+        return
+    admins = db.rows(conn, "SELECT id, username FROM users WHERE role='admin'")
+    with db.tx(conn):
+        for a in admins:
+            conn.execute("UPDATE users SET password_hash=?, must_change=1, active=1 WHERE id=?",
+                         (auth.hash_password(pw), a["id"]))
+            conn.execute("DELETE FROM sessions WHERE user_id=?", (a["id"],))
+    db.audit(conn, {"username": "système"}, "compte.reinitialisation_admin", None,
+             {"comptes": [a["username"] for a in admins]})
+    print(f"[secours] mot de passe réinitialisé pour les administrateurs : "
+          f"{', '.join(a['username'] for a in admins) or 'aucun'}", flush=True)
+
+
+_emergency_admin_reset()
+
 VIEW = Depends(require("view"))
 TIME_ALL = Depends(require("time.all"))
 COSTS = Depends(require("costs"))
