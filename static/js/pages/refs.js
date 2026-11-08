@@ -89,7 +89,7 @@ export async function render(view, { arg, params }) {
   const drawPanel = () => {
     $("#fpanel", view).innerHTML = `<div class="filter-grid">${cfg.cols.map(([k, l, t]) => {
       const f = st.filters[k];
-      if (t === "date") return `<div class="field"><label>${l}</label><div class="row" style="gap:6px;flex-wrap:nowrap"><input type="date" data-from="${k}" value="${f?.from || ""}" aria-label="${l} à partir du"><span class="faint xs">au</span><input type="date" data-to="${k}" value="${f?.to || ""}" aria-label="${l} jusqu'au"></div></div>`;
+      if (t === "date") return `<div class="field field-date"><label>${l} (du … au …)</label><div class="date-range"><input type="date" data-from="${k}" value="${f?.from || ""}" aria-label="${l} à partir du"><span class="faint xs">au</span><input type="date" data-to="${k}" value="${f?.to || ""}" aria-label="${l} jusqu'au"></div></div>`;
       if (t === "enum") {
         const vals = values(k), sel = new Set(Array.isArray(f) ? f : []);
         return `<div class="field"><label>${l}</label><details class="multi"><summary>${sel.size ? `${sel.size} sélectionné${sel.size > 1 ? "s" : ""}` : "Tous"}</summary><div class="multi-list">
@@ -187,6 +187,15 @@ export async function render(view, { arg, params }) {
   const refresh = () => { st.limit = 150; drawChips(); draw(); };
 
   drawHead(); drawPanel(); drawChips(); draw();
+  const closeMulti = (e) => {
+    if (!document.body.contains(view)) return document.removeEventListener("mousedown", closeMulti);
+    view.querySelectorAll("details.multi[open]").forEach((dt) => { if (!dt.contains(e.target)) dt.removeAttribute("open"); });
+  };
+  document.addEventListener("mousedown", closeMulti);
+  view.addEventListener("keydown", (e) => { if (e.key === "Escape") view.querySelectorAll("details.multi[open]").forEach((dt) => dt.removeAttribute("open")); });
+  view.addEventListener("toggle", (e) => {
+    if (e.target.matches?.("details.multi") && e.target.open) view.querySelectorAll("details.multi[open]").forEach((dt) => dt !== e.target && dt.removeAttribute("open"));
+  }, true);
   $("#q", view).oninput = debounce((e) => { st.q = e.target.value; st.limit = 150; draw(); }, 120);
   $("#ftoggle", view).onclick = () => { st.open = !st.open; $("#fpanel", view).hidden = !st.open; };
   $("#add", view)?.addEventListener("click", () => (arg === "collaborators" ? addCollaborator(data) : edit(arg, null, data)));

@@ -295,39 +295,25 @@ async function reviewCosts(pv, m) {
 // =================================================================== RÉPARTITIONS
 async function tabProrata(el, d, m, locked) {
   const p = d.params.prorata || {};
-  const editing = tabProrata.editing || (tabProrata.editing = {});
-  const draft = tabProrata.draft || (tabProrata.draft = {});
   const save = async (np, msg = "Enregistré") => { await api(`/api/months/${m}`, { method: "PUT", json: { prorata: np } }); toast(msg, "success"); rerender(); };
   const card = (x) => {
-    const who = x.collaborator, isEdit = editing[who] && !locked;
-    const rows = isEdit ? draft[who] : (x.lots || []);
-    const total = rows.reduce((a, r) => a + (fmt.parse(r.hours) || 0), 0);
+    const who = x.collaborator, rows = x.lots || [];
     const baseLbl = x.mode === "mirror" ? `Identique à ${esc(x.mirror_of)}`
       : x.base === "jira" ? "Base : heures Jira de l'équipe"
       : `Base : salariés ayant un coût${x.costed_source && x.costed_source !== m ? ` (liste de ${month.label(x.costed_source)}, charges du mois pas encore chargées)` : ""}`;
     return `<div class="card" data-who="${esc(who)}"><div class="card-head">${avatar(who)}<div class="grow"><h2>${esc(who)}</h2><div class="desc">${baseLbl}</div></div>
       ${x.manual ? chip("Ajustée à la main", "warning", "edit") : chip(x.mode === "mirror" ? "Miroir" : "Prorata", "brand")}</div>
       <div class="card-body">
-      ${x.mode === "mirror" || x.manual || isEdit ? "" : `<div class="row" style="margin-bottom:12px"><div class="field" style="flex:1"><label>Jours d'absence</label><input data-k="holidays" type="number" step="0.5" value="${p[who]?.holidays ?? ""}" placeholder="0" ${locked ? "disabled" : ""}></div>
+      ${x.mode === "mirror" || x.manual ? "" : `<div class="row" style="margin-bottom:12px"><div class="field" style="flex:1"><label>Jours d'absence</label><input data-k="holidays" type="number" step="0.5" value="${p[who]?.holidays ?? ""}" placeholder="0" ${locked ? "disabled" : ""}></div>
         <div class="field" style="flex:1"><label>ou total forcé (h)</label><input data-k="hours" type="number" step="0.5" value="${p[who]?.hours ?? ""}" placeholder="${fmt.num(x.hours)}" ${locked ? "disabled" : ""}></div></div>`}
-      <div class="row between" style="margin-bottom:8px"><span class="muted small">Total réparti</span><b>${fmt.h(isEdit ? total : x.hours)}</b></div>
-      <div class="list" style="max-height:${isEdit ? 420 : 260}px;overflow:auto;border:1px solid var(--border);border-radius:10px">
-        ${rows.map((r, i) => isEdit
-          ? `<div class="list-item" style="padding:5px 8px;gap:6px" data-i="${i}"><div class="grow xs ellipsis" title="${esc(r.lot)}">${esc(r.lot)}</div>
-              <input class="in-cell amount" style="width:78px" inputmode="decimal" data-h value="${esc(String(r.hours).replace(".", ","))}">
-              <span class="xs faint" style="width:40px;text-align:right">${total ? fmt.pct((fmt.parse(r.hours) || 0) / total, 0) : ""}</span>
-              <button class="icon-btn" data-rm aria-label="Retirer" style="width:26px;height:26px">${icon("x")}</button></div>`
-          : `<div class="list-item" style="padding:7px 12px"><div class="grow xs ellipsis" title="${esc(r.lot)}">${esc(r.lot)}</div><span class="xs num">${fmt.num(r.hours)} h</span><span class="xs num faint" style="width:70px">${fmt.money0(r.cost)}</span></div>`).join("")
+      <div class="row between" style="margin-bottom:8px"><span class="muted small">Total réparti · ${rows.length} lots</span><b>${fmt.h(x.hours)}</b></div>
+      <div class="list" style="max-height:260px;overflow:auto;border:1px solid var(--border);border-radius:10px">
+        ${rows.map((r) => `<div class="list-item" style="padding:7px 12px"><div class="grow xs ellipsis" title="${esc(r.lot)}">${esc(r.lot)}</div><span class="xs num">${fmt.num(r.hours)} h</span><span class="xs num faint" style="width:70px">${fmt.money0(r.cost)}</span></div>`).join("")
           || `<div class="faint small" style="padding:14px">Aucune heure d'équipe à répartir pour l'instant.</div>`}
-      </div>
-      ${isEdit ? `<div class="row" style="margin-top:10px"><input data-add placeholder="Ajouter un lot…" style="flex:1"></div>
-        <p class="xs faint" style="margin:8px 0 0">Modifiez les heures par lot : le coût de ${esc(who)} sera réparti selon ces proportions.</p>` : ""}
-      </div>
-      ${locked || x.mode === "mirror" ? "" : `<div class="card-foot">${isEdit
-        ? `<button class="btn sm" data-cancel>Annuler</button><button class="btn sm primary" data-save>${icon("check")}Enregistrer la répartition</button>`
-        : x.manual
-          ? `<button class="btn sm" data-reset>${icon("history")}Revenir au calcul automatique</button><button class="btn sm" data-edit>${icon("edit")}Modifier</button>`
-          : `<button class="btn sm" data-edit ${(x.lots || []).length ? "" : "disabled"}>${icon("edit")}Ajuster à la main</button>`}</div>`}
+      </div></div>
+      ${locked || x.mode === "mirror" ? "" : `<div class="card-foot">
+        ${x.manual ? `<button class="btn sm ghost" data-reset>${icon("history")}Calcul automatique</button>` : ""}
+        <button class="btn sm primary" data-edit ${(x.auto_lots || []).length || rows.length ? "" : "disabled"}>${icon("edit")}${x.manual ? "Modifier l'ajustement" : "Ajuster à la main"}</button></div>`}
     </div>`;
   };
   el.innerHTML = `
@@ -338,37 +324,110 @@ async function tabProrata(el, d, m, locked) {
   <div class="grid g3">${d.prorata.map(card).join("") || `<div class="card">${empty("Aucune répartition", "Aucun collaborateur en mode prorata ou miroir (Référentiels › Collaborateurs).", "pie")}</div>`}</div>`;
   if (locked) return;
   $("#wd", el).onchange = async (e) => { await api(`/api/months/${m}`, { method: "PUT", json: { working_days: e.target.value === "" ? null : +e.target.value } }); toast("Enregistré", "success"); rerender(); };
-  const redraw = () => tabProrata(el, d, m, locked);
   $$("[data-who]", el).forEach((c) => {
     const who = c.dataset.who, x = d.prorata.find((y) => y.collaborator === who);
     c.querySelectorAll("input[data-k]").forEach((inp) => inp.addEventListener("change", () => {
       const np = { ...p }; np[who] = { ...(np[who] || {}), [inp.dataset.k]: inp.value === "" ? null : +inp.value }; save(np);
     }));
-    c.querySelector("[data-edit]")?.addEventListener("click", () => {
-      draft[who] = (x.lots || []).map((r) => ({ lot: r.lot, hours: Math.round(r.hours * 100) / 100 })); editing[who] = true; redraw();
-    });
-    c.querySelector("[data-cancel]")?.addEventListener("click", () => { editing[who] = false; redraw(); });
     c.querySelector("[data-reset]")?.addEventListener("click", async () => {
       if (!(await confirmDialog("Revenir au calcul automatique ?", `La répartition ajustée de <b>${esc(who)}</b> sera remplacée par le calcul au prorata des heures de l'équipe.`, { ok: "Revenir" }))) return;
       const np = { ...p }; np[who] = { ...(np[who] || {}) }; delete np[who].lots; save(np, "Répartition automatique rétablie");
     });
-    c.querySelector("[data-save]")?.addEventListener("click", () => {
-      const lots = {}; draft[who].forEach((r) => { const h = fmt.parse(r.hours); if (h > 0) lots[r.lot] = (lots[r.lot] || 0) + h; });
-      if (!Object.keys(lots).length) return toast("Indiquez des heures sur au moins un lot.", "error");
-      editing[who] = false;
+    c.querySelector("[data-edit]")?.addEventListener("click", async () => {
+      const lots = await adjustDialog(x, d);
+      if (!lots) return;
       const np = { ...p }; np[who] = { ...(np[who] || {}), lots }; save(np, `Répartition de ${who} enregistrée`);
     });
-    c.querySelectorAll("[data-i]").forEach((row) => {
-      const i = +row.dataset.i;
-      row.querySelector("[data-h]").addEventListener("change", (e) => { draft[who][i].hours = e.target.value; redraw(); });
-      row.querySelector("[data-rm]").addEventListener("click", () => { draft[who].splice(i, 1); redraw(); });
-    });
-    const add = c.querySelector("[data-add]");
-    if (add) {
-      const opts = [...new Set(d.invoice.lines.map((l) => l.lot).concat(...d.prorata.map((y) => (y.lots || []).map((r) => r.lot))))]
-        .sort().map((l) => ({ value: l, label: l }));
-      combobox(add, () => opts.filter((o) => !draft[who].some((r) => r.lot === o.value)), (o) => { draft[who].push({ lot: o.value, hours: 0 }); redraw(); });
-    }
+  });
+}
+
+/* Fenêtre de travail : ajuster lot par lot la répartition d'un collaborateur au prorata. */
+function adjustDialog(x, d) {
+  const who = x.collaborator;
+  const cost = d.people.find((pp) => pp.collaborator === who)?.cost || 0;
+  const auto = Object.fromEntries((x.auto_lots || []).map((r) => [r.lot, r]));
+  const start = x.manual ? (x.lots || []).map((r) => ({ lot: r.lot, hours: r.hours })) : (x.auto_lots || []).map((r) => ({ lot: r.lot, hours: r.hours }));
+  let rows = start.map((r) => ({ ...r, hours: Math.round(r.hours * 100) / 100 })).sort((a, b) => b.hours - a.hours);
+  let q = "";
+  let rules = {};
+  try { rules = JSON.parse(S.settings.monthly_keywords || "{}"); } catch (_) { /* */ }
+  const kind = (lot) => { const u = lot.toUpperCase(); for (const [k, ws] of Object.entries(rules)) if (ws.some((w) => w && u.includes(w.toUpperCase()))) return k; return "Projet"; };
+  const KIND_CHIP = { Agile: "info", Support: "warning", Run: "brand", Projet: "" };
+  const allLots = [...new Set([...Object.keys(auto), ...d.invoice.lines.map((l) => l.lot), ...d.prorata.flatMap((y) => (y.lots || []).map((r) => r.lot))])].sort();
+  const total = () => rows.reduce((a, r) => a + (+r.hours || 0), 0);
+
+  const body = `<div class="adj">
+    <div class="adj-kpis">
+      <div class="kpi"><div class="kpi-label">${icon("clock")}Total ajusté</div><div class="kpi-value" id="kTot"></div><div class="kpi-sub" id="kLots"></div></div>
+      <div class="kpi"><div class="kpi-label">${icon("pie")}Calcul automatique</div><div class="kpi-value">${fmt.h(x.auto_total)}</div><div class="kpi-sub">${(x.auto_lots || []).length} lots · ${x.base === "jira" ? "heures Jira de l'équipe" : "salariés ayant un coût"}</div></div>
+      <div class="kpi"><div class="kpi-label">${icon("arrowR")}Écart</div><div class="kpi-value" id="kGap"></div><div class="kpi-sub">vs calcul automatique</div></div>
+      <div class="kpi"><div class="kpi-label">${icon("coins")}Coût à répartir</div><div class="kpi-value">${cost ? fmt.money0(cost) : "—"}</div><div class="kpi-sub">${cost ? "coût employeur du mois" : "charges du mois pas encore chargées"}</div></div>
+    </div>
+    <div class="row adj-tools">
+      <div class="input-icon" style="flex:1;min-width:200px;max-width:340px">${icon("search")}<input id="aq" placeholder="Filtrer les lots…"></div>
+      <div style="flex:1;min-width:220px;max-width:380px"><input id="aadd" placeholder="+ Ajouter un lot…"></div>
+      <div style="flex:1"></div>
+      <button class="btn sm" id="aauto" type="button">${icon("history")}Repartir du calcul automatique</button>
+      <button class="btn sm" id="ascale" type="button" title="Garde les proportions, ramène le total au calcul automatique">${icon("layers")}Ramener au total auto</button>
+    </div>
+    <div class="table-wrap adj-table"><table class="t"><thead><tr>
+      <th>Lot</th><th>Type</th><th class="num">Heures équipe</th><th class="num">Auto</th><th class="num" style="width:150px">Ajusté (h)</th><th class="num">Écart</th><th class="num">Part</th><th class="num">Coût estimé</th><th></th></tr></thead>
+      <tbody id="abody"></tbody></table></div>
+    <p class="xs faint" style="margin:10px 0 0">Seules les proportions comptent : le coût de ${esc(who)} est réparti selon la part de chaque lot. Entrée = lot suivant.</p></div>`;
+
+  return modal({
+    title: `Ajuster la répartition — ${esc(who)}`, size: "wide", body,
+    actions: [{ label: "Annuler" }, { label: "Enregistrer et fermer", kind: "primary", icon: "check", onClick: () => {
+      const lots = {};
+      rows.forEach((r) => { const h = +r.hours || 0; if (h > 0) lots[r.lot] = Math.round(((lots[r.lot] || 0) + h) * 100) / 100; });
+      if (!Object.keys(lots).length) { toast("Indiquez des heures sur au moins un lot.", "error"); return false; }
+      return lots;
+    } }],
+    onMount: (ctx) => {
+      const el = ctx.el;
+      const sums = () => {
+        const t = total(), a = x.auto_total || 0, g = t - a;
+        $("#kTot", el).textContent = fmt.h(t);
+        $("#kLots", el).textContent = `${rows.filter((r) => +r.hours > 0).length} lots`;
+        $("#kGap", el).innerHTML = `<span style="color:${Math.abs(g) < 0.05 ? "var(--success)" : "var(--warning)"}">${g > 0 ? "+" : ""}${fmt.num(g)} h</span>`;
+        $$("#abody tr[data-i]", el).forEach((tr) => {
+          const r = rows[+tr.dataset.i], h = +r.hours || 0, au = auto[r.lot]?.hours || 0, share = t ? h / t : 0;
+          tr.querySelector(".c-gap").innerHTML = Math.abs(h - au) < 0.005 ? '<span class="faint">—</span>' : `<span style="color:${h > au ? "var(--success)" : "var(--danger)"}">${h > au ? "+" : ""}${fmt.num(h - au)}</span>`;
+          tr.querySelector(".c-share").innerHTML = `<div class="share"><div style="width:${Math.min(share * 100 * 3, 100)}%"></div><span>${fmt.pct(share, 1)}</span></div>`;
+          tr.querySelector(".c-cost").textContent = cost ? fmt.money0(cost * share) : "—";
+        });
+      };
+      const draw = () => {
+        const w = q.toLowerCase();
+        $("#abody", el).innerHTML = rows.map((r, i) => ({ r, i })).filter(({ r }) => !w || r.lot.toLowerCase().includes(w)).map(({ r, i }) => {
+          const k = kind(r.lot), a = auto[r.lot];
+          return `<tr data-i="${i}"><td style="max-width:420px"><div class="ellipsis" title="${esc(r.lot)}" style="font-weight:550">${esc(r.lot)}</div></td>
+            <td>${chip(k, KIND_CHIP[k])}</td><td class="num faint">${a ? fmt.num(a.base_hours) : "—"}</td><td class="num">${a ? fmt.num(a.hours) : '<span class="faint">—</span>'}</td>
+            <td class="num"><div class="stepper" style="justify-content:flex-end"><button type="button" data-st="-0.5" aria-label="Moins">${icon("minus")}</button><input class="a-h" inputmode="decimal" value="${String(r.hours).replace(".", ",")}" aria-label="Heures ajustées"><button type="button" data-st="0.5" aria-label="Plus">${icon("plus")}</button></div></td>
+            <td class="num c-gap"></td><td class="c-share" style="min-width:120px"></td><td class="num c-cost"></td>
+            <td class="actions"><button class="icon-btn" data-rm aria-label="Retirer le lot">${icon("x")}</button></td></tr>`;
+        }).join("") || `<tr><td colspan="9">${empty("Aucun lot", "Ajoutez un lot ou repartez du calcul automatique.", "layers")}</td></tr>`;
+        $$("#abody tr[data-i]", el).forEach((tr) => {
+          const i = +tr.dataset.i, inp = tr.querySelector(".a-h");
+          inp.addEventListener("input", () => { rows[i].hours = fmt.parse(inp.value) || 0; sums(); });
+          inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); const all = $$(".a-h", el); all[all.indexOf(inp) + 1]?.focus(); all[all.indexOf(inp) + 1]?.select(); } });
+          inp.addEventListener("focus", () => inp.select());
+          tr.querySelectorAll("[data-st]").forEach((b) => (b.onclick = () => { rows[i].hours = Math.max(0, Math.round(((+rows[i].hours || 0) + +b.dataset.st) * 100) / 100); inp.value = String(rows[i].hours).replace(".", ","); sums(); }));
+          tr.querySelector("[data-rm]").onclick = () => { rows.splice(i, 1); draw(); };
+        });
+        sums();
+      };
+      $("#aq", el).oninput = (e) => { q = e.target.value; draw(); };
+      combobox($("#aadd", el), () => allLots.filter((l) => !rows.some((r) => r.lot === l)).map((l) => ({ value: l, label: l, tag: kind(l) })), (o) => {
+        rows.unshift({ lot: o.value, hours: 0 }); $("#aadd", el).value = ""; draw(); $(".a-h", el)?.focus();
+      });
+      $("#aauto", el).onclick = () => { rows = (x.auto_lots || []).map((r) => ({ lot: r.lot, hours: Math.round(r.hours * 100) / 100 })); draw(); toast("Calcul automatique rechargé", "info"); };
+      $("#ascale", el).onclick = () => {
+        const t = total(); if (!t) return;
+        const f = (x.auto_total || t) / t; rows.forEach((r) => (r.hours = Math.round((+r.hours || 0) * f * 100) / 100)); draw();
+      };
+      draw();
+    },
   });
 }
 

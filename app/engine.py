@@ -249,6 +249,10 @@ def compute(conn, month: str) -> dict:
             base[(e["lot"], e["category"], e["sub_category"])] += e["hours"]
         bt = sum(base.values())
         gen = []
+        # calcul automatique, toujours fourni (comparaison dans l'écran d'ajustement)
+        auto_lots = sorted(({"lot": lot, "category": cat, "base_hours": h, "hours": total * h / bt}
+                            for (lot, cat, sub), h in base.items() if h and bt > 0), key=lambda x: -x["hours"])
+        auto_total = total
         manual = {k: float(v) for k, v in (p.get("lots") or {}).items() if v not in (None, "") and float(v) > 0}
         if manual:
             # répartition ajustée à la main : les heures saisies par lot remplacent le calcul
@@ -272,7 +276,7 @@ def compute(conn, month: str) -> dict:
         generated[c["name"]] = gen
         prorata_info.append({"collaborator": c["name"], "holidays": holidays, "hours": total,
                              "hours_override": p.get("hours"), "base": c["prorata_base"], "base_hours": bt,
-                             "mode": "prorata", "manual": bool(manual),
+                             "mode": "prorata", "manual": bool(manual), "auto_lots": auto_lots, "auto_total": auto_total,
                              "costed_source": costed_source if c["prorata_base"] == "costed" else None})
     for c in collabs:
         if c["active"] and c["mode"] == "mirror" and c["name"] not in already:

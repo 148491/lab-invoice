@@ -446,3 +446,25 @@ details.multi summary::after { content: "▾"; margin-left: auto; color: var(--t
 .multi-list label { display: flex; gap: 8px; padding: 5px 6px; border-radius: 6px; }
 .multi-list label:hover { background: var(--bg-2); }
 .multi-q { height: 30px; margin-bottom: 4px; }
+
+/* fenêtre de travail large (≈ 85 % de l'écran) */
+.modal-wide { max-width: min(1500px, 88vw); height: min(88vh, 1000px); }
+.modal-wide .modal-body { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.adj { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.adj-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+.adj-kpis .kpi { padding: 12px 14px; box-shadow: none; }
+.adj-kpis .kpi-value { font-size: 20px; }
+.adj-tools { margin-bottom: 12px; gap: 8px; }
+.adj-table { flex: 1; min-height: 200px; max-height: none; border: 1px solid var(--border); border-radius: 10px; }
+.adj-table .stepper { display: inline-flex; width: 140px; }
+.adj-table .stepper input { width: 60px; }
+.share { position: relative; height: 22px; border-radius: 6px; background: var(--bg-2); overflow: hidden; font-size: 11.5px; }
+.share > div { position: absolute; inset: 0 auto 0 0; background: color-mix(in srgb, var(--brand) 25%, transparent); }
+.share > span { position: relative; padding: 0 8px; line-height: 22px; font-variant-numeric: tabular-nums; }
+@media (max-width: 900px) { .modal-wide { max-width: 100vw; height: 94vh; } .adj-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* filtres : champs de dates côte à côte sans débordement */
+.date-range { display: flex; gap: 6px; align-items: center; }
+.date-range input { flex: 1 1 0; min-width: 0; width: 100%; }
+.filter-grid .field-date { grid-column: span 2; }
+@media (max-width: 760px) { .filter-grid .field-date { grid-column: auto; } }
