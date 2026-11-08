@@ -23,6 +23,20 @@ def domain(lot: str) -> str:
     return base.split(" - ")[0].strip()
 
 
+POSTES = (("cto", "CTO"), ("direction", "Direction"), ("qa", "QA"), ("product", "Gestion de projet"),
+          ("projet", "Gestion de projet"), ("chef", "Gestion de projet"), ("scrum", "Gestion de projet"),
+          ("dev", "Développement"))
+
+
+def poste(role: str) -> str:
+    """Regroupe le rôle libre d'un collaborateur en grand type de poste."""
+    r = (role or "").lower()
+    for key, label in POSTES:
+        if key in r:
+            return label
+    return "Non renseigné"
+
+
 def build(conn) -> dict:
     s = db.settings(conn)
     validated = [r["month"] for r in conn.execute("SELECT month FROM months WHERE status='validated' ORDER BY month")]
@@ -37,11 +51,16 @@ def build(conn) -> dict:
             lots.append({"m": mo, "lot": l["lot"], "base": SUF.sub("", l["lot"]).strip(), "kind": kind,
                          "dom": domain(l["lot"]), "price": round(l["price"], 2), "salary": round(l["salary"], 2),
                          "hours": round(l["hours"], 2),
-                         "team": [[d["collaborator"], round(d["hours"], 1)] for d in l["detail"] if d["hours"] >= 0.05]})
+                         "team": [[d["collaborator"], round(d["hours"], 2), round(d["cost"], 2)]
+                                  for d in l["detail"] if d["hours"] >= 0.05]})
             for d in l["detail"]:
-                t = team.setdefault(d["collaborator"], {}).setdefault(mo, {})
-                t[kind] = round(t.get(kind, 0) + d["hours"], 2)
+                p = team.setdefault(d["collaborator"], {"hours": {}, "cost": {}})
+                th = p["hours"].setdefault(mo, {})
+                th[kind] = round(th.get(kind, 0) + d["hours"], 2)
+                tc = p["cost"].setdefault(mo, {})
+                tc[kind] = round(tc.get(kind, 0) + d["cost"], 2)
     status = {}
+    roles = {r["name"]: r["role"] or "" for r in db.rows(conn, "SELECT name, role FROM collaborators")}
     proj = {p["lot"]: (p["status"], p["mel_date"]) for p in db.rows(conn, "SELECT lot, status, mel_date FROM projects")}
     epics = {e["lot_name"]: (e["status"], e["mel_date"]) for e in db.rows(conn, "SELECT lot_name, status, mel_date FROM epics")}
     for x in lots:
@@ -49,4 +68,4 @@ def build(conn) -> dict:
             stt = proj.get(x["lot"]) or epics.get(x["lot"]) or ("IN PROGRESS", None)
             status[x["lot"]] = {"status": stt[0], "mel": stt[1]}
     return {"months": months, "lots": lots, "status": status, "currency": s.get("currency") or "",
-            "team": [{"name": n, "hours": h} for n, h in team.items()]}
+            "team": [{"name": n, "role": roles.get(n, ""), "poste": poste(roles.get(n, "")), **v} for n, v in team.items()]}

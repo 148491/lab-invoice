@@ -526,3 +526,6 @@ details.multi summary::after { content: "▾"; margin-left: auto; color: var(--t
 .an-series { display: flex; align-items: flex-end; gap: 2px; height: 120px; border-bottom: 1px solid var(--grid); }
 .an-series > div { flex: 1; border-radius: 3px 3px 0 0; }
 @media (max-width: 760px) { .an-filters { position: static; } .abar { grid-template-columns: minmax(0, 120px) 1fr 64px; } }
+.abar[data-link] { cursor: pointer; border-radius: 6px; } .abar[data-link]:hover > span:first-child { color: var(--brand); }
+.pbar { display: inline-block; width: 36px; height: 6px; background: var(--grid); border-radius: 3px; margin-right: 8px; vertical-align: middle; overflow: hidden; }
+.pbar i { display: block; height: 100%; border-radius: 3px; }

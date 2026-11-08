@@ -115,7 +115,9 @@ def test_full_month_flow_with_review(admin):
     assert [x["m"] for x in an["months"]] == [m]
     lot = next(x for x in an["lots"] if x["lot"] == "NOUVEAU PROJET")
     assert lot["kind"] == "Projet" and lot["price"] == pytest.approx(1800) and lot["team"]
-    assert any(t["name"] == "Alice Dev" for t in an["team"])
+    alice = next(t for t in an["team"] if t["name"] == "Alice Dev")
+    assert alice["hours"][m]["Projet"] > 0 and alice["cost"][m]["Projet"] > 0
+    assert lot["team"][0][2] > 0
 
 
 SAMPLES = __import__("pathlib").Path(__file__).resolve().parent.parent / "samples"

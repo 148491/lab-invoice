@@ -13,7 +13,9 @@ const pct = (v) => (v * 100).toFixed(1).replace(".", ",") + " %";
 const sum = (a, f) => a.reduce((s, x) => s + f(x), 0);
 
 let DATA = null, MONTHS = [], ROOT = null;
-const st = { from: null, to: null, types: new Set(TYPES.map((t) => t[0])), tab: "overview", sort: { k: "price", d: -1 }, q: "", status: "all", tables: {}, quick: "all" };
+const st = { from: null, to: null, types: new Set(TYPES.map((t) => t[0])), tab: "overview", sort: { k: "price", d: -1 }, q: "", status: "all", tables: {}, quick: "all", member: null, poste: null, unit: "h", msort: { k: "h", d: -1 } };
+const hfmt = (v) => nf0.format(v) + " pts";
+const h1 = (v) => (Math.round(v * 10) / 10).toLocaleString("fr-FR") + " pts";
 
 export async function render(view) {
   view.innerHTML = `<div class="skel-wrap"><div class="skel" style="height:60px"></div><div class="skel" style="height:320px"></div></div>`;
@@ -46,7 +48,7 @@ export async function render(view) {
     st.types.has(k) ? st.types.delete(k) : st.types.add(k);
     b.classList.toggle("off", !st.types.has(k)); b.setAttribute("aria-pressed", st.types.has(k)); draw();
   });
-  view.querySelectorAll("#anTabs button").forEach((b) => b.onclick = () => { view.querySelectorAll("#anTabs button").forEach((x) => x.classList.toggle("on", x === b)); st.tab = b.dataset.t; draw(); });
+  view.querySelectorAll("#anTabs button").forEach((b) => b.onclick = () => { view.querySelectorAll("#anTabs button").forEach((x) => x.classList.toggle("on", x === b)); st.tab = b.dataset.t; st.member = null; draw(); });
   ensureOverlays();
   draw();
 }
@@ -82,7 +84,7 @@ function stackedBars(el, rows, opt = {}) {
   const iw = W - pad.l - pad.r, ih = H - pad.t - pad.b, step = iw / rows.length, bw = Math.max(4, Math.min(42, step * 0.62));
   const y = (v) => pad.t + ih - (v / top) * ih;
   let svg = `<svg width="${W}" height="${H}" role="img" aria-label="${esc(opt.label || "")}"><g class="axis">`;
-  for (let i = 0; i <= 4; i++) { const v = top * i / 4; svg += `<line x1="${pad.l}" x2="${W - pad.r}" y1="${y(v)}" y2="${y(v)}"/><text x="${pad.l - 8}" y="${y(v) + 4}" text-anchor="end">${kmoney(v)}</text>`; }
+  for (let i = 0; i <= 4; i++) { const v = top * i / 4; svg += `<line x1="${pad.l}" x2="${W - pad.r}" y1="${y(v)}" y2="${y(v)}"/><text x="${pad.l - 8}" y="${y(v) + 4}" text-anchor="end">${(opt.axis || kmoney)(v)}</text>`; }
   const every = Math.ceil(rows.length / Math.max(1, Math.floor(iw / 56)));
   rows.forEach((r, i) => { if (i % every === 0) svg += `<text x="${pad.l + step * i + step / 2}" y="${H - 8}" text-anchor="middle">${esc(r.label)}</text>`; });
   svg += `</g>`;
@@ -101,7 +103,7 @@ function stackedBars(el, rows, opt = {}) {
   el.innerHTML = svg + "</svg>";
   el.querySelectorAll(".hit").forEach((h) => {
     const r = rows[+h.dataset.i];
-    h.onmousemove = (e) => showTip(e, `<div class="t">${esc(r.title || r.label)}</div>${tipRows(types.map(([k, c, l]) => [c, l, money(r.parts[k] || 0)]), money(sum(types, (t) => r.parts[t[0]] || 0)))}`);
+    h.onmousemove = (e) => showTip(e, `<div class="t">${esc(r.title || r.label)}</div>${tipRows(types.map(([k, c, l]) => [c, l, (opt.fmt || money)(r.parts[k] || 0)]), (opt.fmt || money)(sum(types, (t) => r.parts[t[0]] || 0)))}`);
     h.onmouseleave = hideTip;
     if (opt.onClick) { h.style.cursor = "pointer"; h.onclick = () => opt.onClick(r); }
   });
@@ -128,7 +130,7 @@ function lineChart(el, pts, opt = {}) {
   hit.onmouseleave = () => { hideTip(); cross.setAttribute("opacity", 0); dot.setAttribute("opacity", 0); };
 }
 
-function donut(el, parts, center) {
+function donut(el, parts, center, fmt = kmoney) {
   // parts: [{label, color, v}] — anneau avec écart de 2 px entre segments
   const size = Math.min(220, el.clientWidth || 220), r = size / 2 - 14, c = 2 * Math.PI * r, tot = sum(parts, (p) => Math.max(0, p.v)) || 1;
   let acc = 0;
@@ -136,8 +138,8 @@ function donut(el, parts, center) {
   const arcs = parts.map((p, i) => { const len = Math.max(0, p.v) / tot * c; const s = `<circle data-i="${i}" cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="var(${p.color})" stroke-width="26" stroke-dasharray="${Math.max(0, len - gap)} ${c - Math.max(0, len - gap)}" stroke-dashoffset="${-acc}" transform="rotate(-90 ${size / 2} ${size / 2})" style="cursor:pointer"/>`; acc += len; return s; }).join("");
   el.innerHTML = `<div class="an-donut"><svg width="${size}" height="${size}" role="img" aria-label="Répartition run / build">${arcs}
       <text x="${size / 2}" y="${size / 2 - 4}" text-anchor="middle" class="d-big">${center.big}</text><text x="${size / 2}" y="${size / 2 + 16}" text-anchor="middle" class="d-small">${center.small}</text></svg>
-    <div class="an-donut-legend">${parts.map((p) => `<div><span class="sw" style="background:var(${p.color})"></span><div><div class="dl-l">${p.label}</div><div class="dl-v">${pct(p.v / tot)} · ${kmoney(p.v)}</div>${p.sub ? `<div class="xs faint">${p.sub}</div>` : ""}</div></div>`).join("")}</div></div>`;
-  el.querySelectorAll("circle[data-i]").forEach((a) => { const p = parts[+a.dataset.i]; a.onmousemove = (e) => showTip(e, `<div class="t">${p.label}</div><div class="r"><span>Montant</span><b>${money(p.v)}</b></div><div class="r"><span>Part</span><b>${pct(p.v / tot)}</b></div>${p.sub ? `<div class="xs faint" style="margin-top:4px">${p.sub}</div>` : ""}`); a.onmouseleave = hideTip; });
+    <div class="an-donut-legend">${parts.map((p) => `<div><span class="sw" style="background:var(${p.color})"></span><div><div class="dl-l">${p.label}</div><div class="dl-v">${pct(p.v / tot)} · ${fmt(p.v)}</div>${p.sub ? `<div class="xs faint">${p.sub}</div>` : ""}</div></div>`).join("")}</div></div>`;
+  el.querySelectorAll("circle[data-i]").forEach((a) => { const p = parts[+a.dataset.i]; a.onmousemove = (e) => showTip(e, `<div class="t">${p.label}</div><div class="r"><span>Valeur</span><b>${fmt === kmoney ? money(p.v) : fmt(p.v)}</b></div><div class="r"><span>Part</span><b>${pct(p.v / tot)}</b></div>${p.sub ? `<div class="xs faint" style="margin-top:4px">${p.sub}</div>` : ""}`); a.onmouseleave = hideTip; });
 }
 
 const spark = (vals, w = 110, h = 26) => {
@@ -152,7 +154,8 @@ const abar = (label, parts, max, right, attrs = "") => `<div class="abar" ${attr
 function draw() {
   hideTip();
   const v = $("#anView", ROOT); if (!v) return;
-  ({ overview, projects: projectsView, recurring: recurringView, domains: domainsView, team: teamView })[st.tab](v);
+  if (st.tab === "team" && st.member) memberView(v);
+  else ({ overview, projects: projectsView, recurring: recurringView, domains: domainsView, team: teamView })[st.tab](v);
   v.querySelectorAll("[data-tt]").forEach((b) => b.onclick = () => { st.tables[b.dataset.tt] = !st.tables[b.dataset.tt]; draw(); });
 }
 
@@ -263,25 +266,48 @@ function domainsView(v) {
   el.querySelectorAll("[data-i]").forEach((r) => { const d = top[+r.dataset.i]; r.onmousemove = (e) => showTip(e, `<div class="t">${esc(d.dom)}</div>${tipRows(types.map(([k, c, l]) => [c, l, money(d.parts[k] || 0)]), `${money(d.v)} · ${d.lots.size} lots`)}`); r.onmouseleave = hideTip; });
 }
 
+const POSTES = ["Développement", "Gestion de projet", "QA", "Direction", "CTO", "Non renseigné"];
 function teamView(v) {
-  const ms = months(), types = TYPES.filter((t) => st.types.has(t[0]));
-  const T = DATA.team.map((p) => { const parts = {}; ms.forEach((m) => Object.entries(p.hours[m] || {}).forEach(([k, h]) => { if (st.types.has(k)) parts[k] = (parts[k] || 0) + h; })); return { name: p.name, parts, v: sum(Object.values(parts), (x) => x) }; }).filter((p) => p.v > 0).sort((a, b) => b.v - a.v);
-  const max = Math.max(1, ...T.map((p) => p.v)), tot = sum(T, (p) => p.v);
-  v.innerHTML = `<div class="grid an-g-wide"><div class="card"><div class="card-head"><div class="grow"><h2>Heures par collaborateur et par type</h2><div class="desc">Heures facturées sur la période (répartitions au prorata comprises) · aucun coût individuel affiché</div></div>${tableToggle("team")}</div>
-      <div class="card-body">${legend()}<div id="anTm" style="margin-top:10px"></div></div></div>
-      <div class="card"><div class="card-head"><div class="grow"><h2>Où va le temps de l'équipe</h2><div class="desc">${nf0.format(tot)} h sur ${ms.length} mois</div></div></div><div class="card-body" id="anTeamDonut"></div></div></div>`;
-  donut($("#anTeamDonut", v), types.map(([k, c, l]) => ({ label: l, color: c, v: sum(T, (p) => p.parts[k] || 0) })), { big: nf0.format(tot), small: "heures" });
-  $("#anTeamDonut", v).querySelectorAll(".dl-v").forEach((e) => (e.textContent = e.textContent.replace(/ · .*$/, "")));
+  const ms = months(), types = TYPES.filter((t) => st.types.has(t[0])), cost = st.unit === "c", key = cost ? "cost" : "hours";
+  const F = cost ? kmoney : hfmt, Fx = cost ? money : hfmt;
+  const T = DATA.team.map((p) => { const parts = {}; ms.forEach((m) => Object.entries(p[key][m] || {}).forEach(([k, x]) => { if (st.types.has(k)) parts[k] = (parts[k] || 0) + x; })); return { name: p.name, poste: p.poste, role: p.role, parts, v: sum(Object.values(parts), (x) => x) }; }).filter((p) => p.v > 0).sort((a, b) => b.v - a.v);
+  const tot = sum(T, (p) => p.v);
+  // regroupement par poste
+  const G = POSTES.map((g) => { const ps = T.filter((p) => p.poste === g), parts = {}; ps.forEach((p) => Object.entries(p.parts).forEach(([k, x]) => (parts[k] = (parts[k] || 0) + x))); return { g, n: ps.length, parts, v: sum(ps, (p) => p.v) }; }).filter((g) => g.v > 0);
+  const gmax = Math.max(1, ...G.map((g) => g.v));
+  if (st.poste && !G.some((g) => g.g === st.poste)) st.poste = null;
+  const TL = st.poste ? T.filter((p) => p.poste === st.poste) : T, max = Math.max(1, ...TL.map((p) => p.v));
+  v.innerHTML = `<div class="row" style="justify-content:flex-end;margin-bottom:12px"><div class="seg" id="anUnit"><button data-u="h" class="${cost ? "" : "on"}">Points (heures)</button><button data-u="c" class="${cost ? "on" : ""}">Coût</button></div></div>
+    <div class="grid an-g-wide-r" style="margin-bottom:16px">
+      <div class="card"><div class="card-head"><div class="grow"><h2>Répartition par poste</h2><div class="desc">${cost ? "Coût salarial" : "Points"} par type de poste et par type d'activité · <b>cliquez sur un poste pour filtrer les collaborateurs</b></div></div>${tableToggle("poste")}</div>
+        <div class="card-body">${legend()}<div id="anPostes" style="margin-top:10px"></div></div></div>
+      <div class="card"><div class="card-head"><div class="grow"><h2>Où ${cost ? "va le coût" : "va le temps"} de l'équipe</h2><div class="desc">${Fx(tot)} sur ${ms.length} mois</div></div></div><div class="card-body" id="anTeamDonut"></div></div></div>
+    <div class="card"><div class="card-head"><div class="grow"><h2>${cost ? "Coût" : "Points"} par collaborateur${st.poste ? ` · ${esc(st.poste)}` : ""}</h2><div class="desc">Répartitions au prorata comprises · <b>cliquez sur un nom pour ouvrir sa fiche</b></div></div>
+      ${st.poste ? `<button class="btn sm ghost" id="anPosteClear">${icon("x")}Tous les postes</button>` : ""}${tableToggle("team")}</div>
+      <div class="card-body">${legend()}<div id="anTm" style="margin-top:10px"></div></div></div>`;
+  v.querySelectorAll("#anUnit button").forEach((b) => b.onclick = () => { st.unit = b.dataset.u; draw(); });
+  if ($("#anPosteClear", v)) $("#anPosteClear", v).onclick = () => { st.poste = null; draw(); };
+  donut($("#anTeamDonut", v), types.map(([k, c, l]) => ({ label: l, color: c, v: sum(T, (p) => p.parts[k] || 0) })), { big: cost ? kmoney(tot) : nf0.format(tot), small: cost ? "coût" : "points" }, F);
+  // postes
+  const pe = $("#anPostes", v);
+  if (st.tables.poste) {
+    pe.innerHTML = `<div class="table-wrap"><table class="t"><thead><tr><th>Poste</th><th class="num">Pers.</th>${types.map((t) => `<th class="num">${t[2]}</th>`).join("")}<th class="num">Total</th><th class="num">% équipe</th></tr></thead><tbody>${G.map((g) => `<tr class="clickable" data-g="${esc(g.g)}"><td>${esc(g.g)}</td><td class="num">${g.n}</td>${types.map((t) => `<td class="num">${cost ? money(g.parts[t[0]] || 0) : nf0.format(g.parts[t[0]] || 0)}<div class="xs faint">${pct(g.v ? (g.parts[t[0]] || 0) / g.v : 0)}</div></td>`).join("")}<td class="num"><b>${cost ? money(g.v) : nf0.format(g.v)}</b></td><td class="num">${pct(tot ? g.v / tot : 0)}</td></tr>`).join("")}</tbody></table></div>`;
+  } else pe.innerHTML = G.map((g) => abar(`${g.g} (${g.n})`, types.map((t) => ({ v: g.parts[t[0]] || 0, c: t[1] })), gmax, `${F(g.v)} · ${Math.round(tot ? g.v / tot * 100 : 0)} %`, `data-g="${esc(g.g)}" data-link="1"${st.poste === g.g ? ' style="font-weight:700"' : ""}`)).join("");
+  pe.querySelectorAll("[data-g]").forEach((r) => { const g = G.find((x) => x.g === r.dataset.g);
+    r.onmousemove = (e) => showTip(e, `<div class="t">${esc(g.g)} · ${g.n} pers.</div>${tipRows(types.map(([k, c, l]) => [c, l, `${Fx(g.parts[k] || 0)} · ${pct(g.v ? (g.parts[k] || 0) / g.v : 0)}`]), `${Fx(g.v)} · ${pct(tot ? g.v / tot : 0)} de l'équipe`)}`);
+    r.onmouseleave = hideTip; r.onclick = () => { hideTip(); st.poste = st.poste === g.g ? null : g.g; draw(); }; });
+  // collaborateurs
   const el = $("#anTm", v);
-  if (st.tables.team) { el.innerHTML = `<table class="t"><thead><tr><th>Collaborateur</th>${types.map((t) => `<th class="num">${t[2]}</th>`).join("")}<th class="num">Total</th></tr></thead><tbody>${T.map((p) => `<tr><td>${esc(p.name)}</td>${types.map((t) => `<td class="num">${nf0.format(p.parts[t[0]] || 0)}</td>`).join("")}<td class="num"><b>${nf0.format(p.v)}</b></td></tr>`).join("")}</tbody></table>`; return; }
-  el.innerHTML = T.map((p, i) => abar(p.name, types.map((t) => ({ v: p.parts[t[0]] || 0, c: t[1] })), max, `${nf0.format(p.v)} h`, `data-i="${i}"`)).join("");
-  el.querySelectorAll("[data-i]").forEach((r) => { const p = T[+r.dataset.i]; r.onmousemove = (e) => showTip(e, `<div class="t">${esc(p.name)}</div>${tipRows(types.map(([k, c, l]) => [c, l, `${nf0.format(p.parts[k] || 0)} h · ${pct(p.v ? (p.parts[k] || 0) / p.v : 0)}`]))}`); r.onmouseleave = hideTip; });
+  if (st.tables.team) { el.innerHTML = `<div class="table-wrap"><table class="t"><thead><tr><th>Collaborateur</th><th>Poste</th>${types.map((t) => `<th class="num">${t[2]}</th>`).join("")}<th class="num">Total</th></tr></thead><tbody>${TL.map((p) => `<tr class="clickable"><td>${esc(p.name)}</td><td class="xs muted">${esc(p.poste)}</td>${types.map((t) => `<td class="num">${cost ? money(p.parts[t[0]] || 0) : nf0.format(p.parts[t[0]] || 0)}</td>`).join("")}<td class="num"><b>${cost ? money(p.v) : nf0.format(p.v)}</b></td></tr>`).join("")}</tbody></table></div>`; el.querySelectorAll("tbody tr").forEach((tr, i) => tr.onclick = () => openMember(TL[i].name)); return; }
+  el.innerHTML = TL.map((p, i) => abar(p.name, types.map((t) => ({ v: p.parts[t[0]] || 0, c: t[1] })), max, F(p.v), `data-i="${i}" data-link="1"`)).join("");
+  el.querySelectorAll("[data-i]").forEach((r) => { const p = TL[+r.dataset.i]; r.onmousemove = (e) => showTip(e, `<div class="t">${esc(p.name)} · ${esc(p.poste)}</div>${tipRows(types.map(([k, c, l]) => [c, l, `${Fx(p.parts[k] || 0)} · ${pct(p.v ? (p.parts[k] || 0) / p.v : 0)}`]))}<div class="xs faint" style="margin-top:6px">Run : ${pct(p.v ? (p.parts.Support || 0) / p.v : 0)} · cliquez pour la fiche</div>`); r.onmouseleave = hideTip; r.onclick = () => { hideTip(); openMember(p.name); }; });
 }
 
 // ---------------------------------------------------------------- panneaux de détail
 function openDrawer(title, sub, body) {
   drawer.innerHTML = `<div class="dh"><div style="flex:1;min-width:0"><div class="xs faint">${sub}</div><h2 style="font-size:17px;margin-top:2px">${esc(title)}</h2></div><button class="icon-btn" aria-label="Fermer">${icon("x")}</button></div><div class="db">${body}</div>`;
   drawer.querySelector(".icon-btn").onclick = closeDrawer; drawer.classList.add("on");
+  drawer.querySelectorAll("[data-member]").forEach((r) => r.onclick = () => { closeDrawer(); openMember(r.dataset.member); });
 }
 function seriesBlock(byM, label) {
   const max = Math.max(1, ...Object.values(byM));
@@ -291,7 +317,8 @@ function teamBlock(ls) {
   const t = {}; ls.forEach((l) => l.team.forEach(([n, h]) => (t[n] = (t[n] || 0) + h)));
   const T = Object.entries(t).sort((a, b) => b[1] - a[1]), max = T[0]?.[1] || 1;
   if (!T.length) return "";
-  return `<h3 style="margin:20px 0 8px">Qui a travaillé dessus (période)</h3>${T.map(([n, h]) => abar(n, [{ v: h, c: "--s1" }], max, `${nf0.format(h)} h`)).join("")}`;
+  const tot = sum(T, (x) => x[1]);
+  return `<h3 style="margin:20px 0 8px">Qui a travaillé dessus (période)</h3>${T.map(([n, h]) => abar(n, [{ v: h, c: "--s1" }], max, `${nf0.format(h)} pts · ${Math.round(h / tot * 100)} %`, `data-link="1" data-member="${esc(n)}"`)).join("")}`;
 }
 function projectDrawer(lot) {
   const ls = DATA.lots.filter((l) => l.lot === lot), byM = {}; ls.forEach((l) => (byM[l.m] = (byM[l.m] || 0) + l.price));
@@ -315,3 +342,63 @@ function monthDrawer(m) {
     ${ls.map((l) => abar(l.lot, [{ v: l.price, c: typeOf(l.kind)[1] }], max, kmoney(l.price), `data-lot="${esc(l.lot)}" data-kind="${l.kind}" data-base="${esc(l.base)}" style="cursor:pointer"`)).join("")}`);
   drawer.querySelectorAll("[data-lot]").forEach((r) => r.onclick = () => r.dataset.kind === "Projet" ? projectDrawer(r.dataset.lot) : familyDrawer(r.dataset.base));
 }
+
+// ---------------------------------------------------------------- fiche d'un membre de l'équipe
+function openMember(name) {
+  st.tab = "team"; st.member = name;
+  ROOT.querySelectorAll("#anTabs button").forEach((x) => x.classList.toggle("on", x.dataset.t === "team"));
+  draw(); ROOT.scrollIntoView({ block: "start" });
+}
+
+function memberView(v) {
+  const P = DATA.team.find((p) => p.name === st.member);
+  if (!P) { st.member = null; return teamView(v); }
+  const ms = months(), types = TYPES.filter((t) => st.types.has(t[0])), cost = st.unit === "c";
+  const F = cost ? kmoney : hfmt, Fx = cost ? money : h1, key = cost ? "cost" : "hours";
+  // lignes par lot (projets) ou par activité (récurrentes, tous mois confondus)
+  const rows = {};
+  DATA.lots.filter((l) => inRange(l.m) && st.types.has(l.kind)).forEach((l) => {
+    const me = l.team.find((t) => t[0] === P.name); if (!me) return;
+    const k = l.kind === "Projet" ? l.lot : l.base;
+    const r = rows[k] || (rows[k] = { k, kind: l.kind, h: 0, c: 0, lh: 0, lc: 0, months: new Set() });
+    r.h += me[1]; r.c += me[2]; r.lh += l.hours; r.lc += l.salary; r.months.add(l.m);
+  });
+  const R = Object.values(rows), H = sum(R, (r) => r.h), C = sum(R, (r) => r.c);
+  R.forEach((r) => { r.ph = H ? r.h / H : 0; r.pc = C ? r.c / C : 0; r.sh = r.lh ? r.h / r.lh : 0; r.sc = r.lc ? r.c / r.lc : 0; r.n = r.months.size; });
+  const { k: sk, d: sd } = st.msort; R.sort((a, b) => (typeof a[sk] === "number" ? a[sk] - b[sk] : String(a[sk]).localeCompare(String(b[sk]))) * sd);
+  const byType = (k) => sum(R.filter((r) => r.kind === k), (r) => (cost ? r.c : r.h));
+  const tot = cost ? C : H, run = byType("Support");
+  const active = ms.filter((m) => Object.values(P.hours[m] || {}).some((x) => x > 0)).length;
+  const others = DATA.team.map((p) => p.name).filter((n) => n !== P.name).sort((a, b) => a.localeCompare(b, "fr"));
+  v.innerHTML = `<div class="row" style="gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
+      <button class="btn sm ghost" id="anBack">← Équipe</button>
+      <div style="flex:1;min-width:180px"><h2 style="font-size:20px;margin:0">${esc(P.name)}</h2><div class="xs muted">${esc(P.poste)}${P.role && P.role !== P.poste ? " · " + esc(P.role) : ""}</div></div>
+      <select id="anWho" aria-label="Autre collaborateur" style="width:auto;height:34px"><option value="${esc(P.name)}">${esc(P.name)}</option>${others.map((n) => `<option>${esc(n)}</option>`).join("")}</select>
+      <div class="seg" id="anUnit"><button data-u="h" class="${cost ? "" : "on"}">Points (heures)</button><button data-u="c" class="${cost ? "on" : ""}">Coût</button></div></div>
+    <div class="grid g4" style="margin-bottom:16px">
+      <div class="kpi"><div class="kpi-label">${icon("clock")}Points (heures)</div><div class="kpi-value">${nf0.format(H)}</div><div class="kpi-sub">${active} mois actifs · ${nf0.format(H / Math.max(1, active))} / mois</div></div>
+      <div class="kpi"><div class="kpi-label">${icon("coins")}Coût salarial affecté</div><div class="kpi-value">${kmoney(C)}</div><div class="kpi-sub">${H ? money(C / H) + " / point en moyenne" : "—"}</div></div>
+      <div class="kpi"><div class="kpi-label">${icon("folder")}Lots et activités</div><div class="kpi-value">${R.length}</div><div class="kpi-sub">${R.filter((r) => r.kind === "Projet").length} projets</div></div>
+      <div class="kpi"><div class="kpi-label">${icon("zap")}Part du run (bug fixes)</div><div class="kpi-value">${pct(tot ? run / tot : 0)}</div><div class="kpi-sub">${cost ? "en coût" : "en points"} · build ${pct(tot ? 1 - run / tot : 0)}</div></div></div>
+    <div class="grid an-g-wide" style="margin-bottom:16px">
+      <div class="card"><div class="card-head"><div class="grow"><h2>Répartition par type</h2><div class="desc">${cost ? "Coût" : "Points"} sur la période</div></div></div><div class="card-body" id="anMDonut"></div></div>
+      <div class="card"><div class="card-head"><div class="grow"><h2>${cost ? "Coût" : "Points"} par mois</h2><div class="desc">Survolez une barre pour le détail</div></div></div><div class="card-body">${legend()}<div id="anMBars" style="margin-top:8px"></div></div></div></div>
+    <div class="card"><div class="card-head"><div class="grow"><h2>Répartition par projet</h2><div class="desc"><b>% de son temps / coût</b> : où vont ses points · <b>Sa part du lot</b> : ce qu'il représente dans le lot · cliquez sur une ligne pour le détail du lot</div></div></div>
+      <div class="table-wrap tall"><table class="t"><thead><tr>
+      ${[["k", "Lot / activité"], ["kind", "Type"], ["n", "Mois", 1], ["h", "Points", 1], ["ph", "% de ses pts", 1], ["c", "Coût", 1], ["pc", "% de son coût", 1], ["sh", "Part du lot · pts", 1], ["sc", "Part du lot · coût", 1]].map(([k2, l, n]) => `<th class="sortable ${n ? "num" : ""} ${sk === k2 ? "sorted" : ""}" data-msort="${k2}">${l}<span class="sort-ic">${sk === k2 ? (sd > 0 ? "▲" : "▼") : "↕"}</span></th>`).join("")}</tr></thead>
+      <tbody>${R.map((r) => `<tr class="clickable" data-lot="${esc(r.k)}" data-kind="${r.kind}"><td style="max-width:240px"><div class="ellipsis" style="font-weight:600" title="${esc(r.k)}">${esc(r.k)}</div></td>
+        <td class="nowrap xs"><span class="sw" style="background:var(${typeOf(r.kind)[1]});margin-right:6px"></span>${typeOf(r.kind)[2]}</td><td class="num">${r.n}</td>
+        <td class="num"><b>${h1(r.h).replace(" pts", "")}</b></td><td class="num">${pbar(r.ph)}</td><td class="num"><b>${money(r.c)}</b></td><td class="num">${pbar(r.pc)}</td>
+        <td class="num">${pct(r.sh)}</td><td class="num">${pct(r.sc)}</td></tr>`).join("") || `<tr><td colspan="9">${empty("Aucune heure sur la période")}</td></tr>`}</tbody>
+      ${R.length ? `<tfoot><tr><td colspan="3"><b>Total</b></td><td class="num"><b>${nf0.format(H)}</b></td><td class="num">100 %</td><td class="num"><b>${money(C)}</b></td><td class="num">100 %</td><td></td><td></td></tr></tfoot>` : ""}</table></div></div>
+    <div class="alert alert-info" style="margin-top:16px">${icon("info")}<div>Points = heures de la feuille de temps (prorata compris). Coût = sa part de salaire chargé affectée au lot, au prorata de ses points dans le mois (hors DAP, frais généraux et cost +). « Sa part du lot » compare à l'ensemble des points ou des salaires du lot.</div></div>`;
+  $("#anBack", v).onclick = () => { st.member = null; draw(); };
+  $("#anWho", v).onchange = (e) => openMember(e.target.value);
+  v.querySelectorAll("#anUnit button").forEach((b) => b.onclick = () => { st.unit = b.dataset.u; draw(); });
+  v.querySelectorAll("th[data-msort]").forEach((th) => th.onclick = () => { const k2 = th.dataset.msort; st.msort = { k: k2, d: st.msort.k === k2 ? -st.msort.d : (["k", "kind"].includes(k2) ? 1 : -1) }; draw(); });
+  v.querySelectorAll("tbody tr[data-lot]").forEach((tr) => tr.onclick = () => tr.dataset.kind === "Projet" ? projectDrawer(tr.dataset.lot) : familyDrawer(tr.dataset.lot));
+  donut($("#anMDonut", v), types.map(([k, c, l]) => ({ label: l, color: c, v: byType(k) })), { big: cost ? kmoney(tot) : nf0.format(tot), small: cost ? "coût" : "points" }, F);
+  stackedBars($("#anMBars", v), ms.map((m) => { const parts = {}; Object.entries(P[key][m] || {}).forEach(([k, x]) => (parts[k] = x)); return { label: ml(m), parts }; }),
+    { label: `${cost ? "Coût" : "Points"} par mois`, axis: cost ? kmoney : (x) => nf0.format(x), fmt: Fx, h: 260 });
+}
+const pbar = (x, c = "--s1") => `<span class="pbar"><i style="width:${Math.min(100, x * 100)}%;background:var(${c})"></i></span>${pct(x)}`;
