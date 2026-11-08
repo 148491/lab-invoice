@@ -138,9 +138,17 @@ def compute(conn, month: str) -> dict:
 
     # ---- coûts employeur du mois (somme de toutes les catégories)
     costs: dict[str, float] = defaultdict(float)
+    billing = (s.get("billing_entity") or "").strip()
+    outside = {c["name"] for c in collabs if billing and (c.get("entity") or "").strip()
+               and c["entity"].strip().casefold() != billing.casefold()}
+    excluded_hours, excluded_cost = defaultdict(float), defaultdict(float)
     cost_lines = db.rows(conn, "SELECT * FROM costs WHERE month = ?", (month,))
     for r in cost_lines:
-        costs[resolve(r["collaborator"])] += r["amount"]
+        n = resolve(r["collaborator"])
+        if n in outside:
+            excluded_cost[n] += r["amount"]
+            continue
+        costs[n] += r["amount"]
 
     # ---- temps saisis
     raw = db.rows(conn, "SELECT * FROM entries WHERE month = ? ORDER BY id", (month,))
@@ -148,6 +156,9 @@ def compute(conn, month: str) -> dict:
     no_epic, unknown_epic, unknown_people, ignored_prorata = [], defaultdict(list), set(), defaultdict(float)
     for e in raw:
         name = resolve(e["collaborator"])
+        if name in outside:
+            excluded_hours[name] += e["hours"]
+            continue
         c = collab_by_name.get(name)
         if c is None:
             unknown_people.add(name)
@@ -190,6 +201,13 @@ def compute(conn, month: str) -> dict:
     for name in sorted(unknown_people):
         issues.append(_issue("warning", "unknown_collaborator",
                              f"Collaborateur inconnu du référentiel : {name} (créé automatiquement en mode Jira à la validation)."))
+    if excluded_hours or excluded_cost:
+        who = sorted(set(excluded_hours) | set(excluded_cost))
+        issues.append(_issue("info", "outside_entity",
+                             f"{sum(excluded_hours.values()):.2f} h de {len(who)} collaborateur(s) hors de l'entité facturée "
+                             f"« {billing} » exclues de la facture : {', '.join(who)}.",
+                             [{"id": None, "collaborator": n, "issue_key": "", "summary": "hors entité",
+                               "hours": excluded_hours.get(n, 0)} for n in who]))
     for name, h in ignored_prorata.items():
         issues.append(_issue("info", "prorata_jira_ignored",
                              f"{h:.2f} h Jira de {name} ignorées : son temps est réparti au prorata."))

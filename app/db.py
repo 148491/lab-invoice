@@ -33,7 +33,9 @@ CREATE TABLE IF NOT EXISTS collaborators (
     prorata_base  TEXT NOT NULL DEFAULT 'costed',   -- 'jira' (heures Jira de l'équipe) | 'costed' (heures des salariés ayant un coût)
     mirror_of     TEXT DEFAULT NULL,
     aliases       TEXT NOT NULL DEFAULT '[]',
-    active        INTEGER NOT NULL DEFAULT 1
+    active        INTEGER NOT NULL DEFAULT 1,
+    entity        TEXT NOT NULL DEFAULT '',         -- entreprise de rattachement
+    team          TEXT NOT NULL DEFAULT ''          -- équipe
 );
 
 -- Référentiel des epics Jira (onglet Roadmap_Project_Names)
@@ -159,6 +161,8 @@ DEFAULT_SETTINGS = {
         "Run": ["REUNIONS & PILOTAGE", "INFRA & SERVICES", "CI/CD", "DOCUMENTATION", "CX - RUN", "FASTERIZE"],
     }, ensure_ascii=False),
     "expected_tolerance": "0.2",
+    # Entité facturée : seuls ses collaborateurs (temps et coûts) entrent dans la facture ; vide = tous
+    "billing_entity": "",
 }
 
 
@@ -204,8 +208,17 @@ class ThreadLocalConnection:
         return getattr(self._conn(), name)
 
 
+def _migrate(conn: sqlite3.Connection) -> None:
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(collaborators)")}
+    if "entity" not in cols:
+        conn.execute("ALTER TABLE collaborators ADD COLUMN entity TEXT NOT NULL DEFAULT ''")
+    if "team" not in cols:
+        conn.execute("ALTER TABLE collaborators ADD COLUMN team TEXT NOT NULL DEFAULT ''")
+
+
 def init(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    _migrate(conn)
     for k, v in DEFAULT_SETTINGS.items():
         conn.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (k, v))
     conn.execute("DELETE FROM settings WHERE key = 'recurring_categories'")

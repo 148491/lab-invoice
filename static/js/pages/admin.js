@@ -102,6 +102,7 @@ async function settings(view) {
   <div class="grid g-side"><div class="stack"><div class="card"><div class="card-head"><h2>Facture et calcul</h2></div><form class="card-body form-grid" id="sf" onsubmit="return false">
     ${F.map(([k, l, area]) => field({ name: k, label: l, value: st[k], type: area ? "textarea" : "text", rows: 2, full: !!area }))}</form>
     <div class="card-foot"><button class="btn primary" id="save">Enregistrer</button></div></div>
+    <div class="card" id="entCard"></div>
     <div class="card"><div class="card-head"><div class="grow"><h2>Lots facturés au mois</h2><div class="desc">Une epic dont le nom (JIRA NAME) contient l'un de ces mots est facturée mois par mois : « CSE - BUG FIXES » devient « CSE - BUG FIXES - 10/26 », livré en fin de mois. Toutes les autres epics sont des projets : une seule ligne jusqu'à leur mise en ligne.</div></div></div>
       <form class="card-body stack" id="mk" style="gap:12px" onsubmit="return false">
         ${KINDS.map(([k, l]) => field({ name: k, label: l, value: (rules[k] || []).join(", "), help: "Mots-clés séparés par des virgules, majuscules ou minuscules indifférentes." })).join("")}
@@ -116,6 +117,7 @@ async function settings(view) {
         <p class="xs faint" style="margin:0">Rejouable : l'historique repris est remplacé ; comptes, saisies et mois en cours sont conservés.</p></div></div>
     <div class="card card-pad"><h3>Version 2 — Jira</h3><p class="small muted" style="margin:0">L'import des temps est isolé : il pourra lire directement les worklogs Jira (projets MC et RD10) au lieu du fichier.</p></div></div></div>`;
   aiModule($("#aiCard", view));
+  entityModule($("#entCard", view), st);
   $("#saveMk", view).onclick = async () => {
     const data = Object.fromEntries(new FormData($("#mk", view)));
     const out = Object.fromEntries(Object.entries(data).map(([k, v]) => [k, v.split(",").map((x) => x.trim()).filter(Boolean)]));
@@ -244,4 +246,28 @@ async function aiModule(card) {
   };
   draw();
   if (state.provider && state.provider !== "off" && st.keys[state.provider]?.origin) loadModels().catch(() => {});
+}
+
+
+// ------------------------------------------------------------------ entité facturée
+async function entityModule(card, st) {
+  const collabs = await api("/api/ref/collaborators");
+  const ents = {};
+  collabs.filter((c) => c.active).forEach((c) => { const e = c.entity || ""; (ents[e] ||= []).push(c.name); });
+  const names = Object.keys(ents).filter(Boolean).sort();
+  const cur = st.billing_entity || "";
+  card.innerHTML = `<div class="card-head"><div class="grow"><h2>Entité facturée</h2><div class="desc">La facture ne reprend que les temps et les coûts des collaborateurs de cette entité. Les entités et équipes se définissent dans Référentiels › Collaborateurs.</div></div></div>
+    <div class="card-body stack" style="gap:12px">
+      <div class="field"><label>Entité facturée</label><select id="billEnt"><option value="">Toutes les entités (aucune exclusion)</option>${names.map((n) => `<option ${n === cur ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></div>
+      <div class="list" style="border:1px solid var(--border);border-radius:10px">${Object.entries(ents).sort().map(([e, ns]) => `<div class="list-item" style="align-items:flex-start"><div style="width:150px">${e ? chip(e, e === cur ? "success" : "info") : '<span class="faint small">Sans entité</span>'}</div><div class="grow xs muted">${ns.map(esc).join(", ")}</div><span class="xs faint">${ns.length}</span></div>`).join("")}</div>
+      ${cur && ents[""]?.length ? `<p class="xs" style="margin:0;color:var(--warning)">${icon("alert")} Les collaborateurs sans entité restent inclus dans la facture.</p>` : ""}
+    </div>
+    <div class="card-foot"><a class="btn sm ghost" href="#/collaborateurs">${icon("users")}Gérer les entités</a><button class="btn primary" id="saveEnt">Enregistrer</button></div>`;
+  $("#saveEnt", card).onclick = async () => {
+    const v = $("#billEnt", card).value;
+    S.settings = await api("/api/settings", { method: "PUT", json: { billing_entity: v } });
+    st.billing_entity = v;
+    toast(v ? `Facturation limitée à l'entité « ${v} »` : "Toutes les entités sont facturées", "success");
+    entityModule(card, st);
+  };
 }

@@ -574,7 +574,7 @@ def copy_previous_costs(month: str, user=COSTS):
 
 # ================================================================== référentiels
 TABLES = {
-    "collaborators": ("id", ["name", "role", "mode", "prorata_base", "mirror_of", "aliases", "active"]),
+    "collaborators": ("id", ["name", "role", "mode", "prorata_base", "mirror_of", "aliases", "active", "entity", "team"]),
     "epics": ("epic_key", ["epic_key", "label", "lot_name", "status", "mel_date", "sub_category", "category"]),
     "projects": ("lot", ["lot", "status", "mel_date", "sub_category", "category"]),
 }

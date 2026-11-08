@@ -435,11 +435,9 @@ function actionsFor(i, locked) {
   }[i.code] || "";
 }
 
-async function lotPicker(title, initial = "") {
-  const projects = await api("/api/ref/projects");
-  const epics = await api("/api/ref/epics");
-  const opts = [...epics.filter((e) => e.status !== "ABANDONED").map((e) => ({ value: e.lot_name, label: e.lot_name, sub: e.label, tag: e.category })),
-    ...projects.filter((p) => p.status === "IN PROGRESS").map((p) => ({ value: p.lot, label: p.lot, sub: "projet", tag: p.category }))];
+async function lotPicker(title, initial = "", m = month.current()) {
+  // uniquement les projets encore ouverts ce mois-ci
+  const opts = (await api(`/api/lots/options?month=${m}`)).map((o) => ({ value: o.lot, label: o.lot, sub: o.kind === "epic" ? o.value : "projet", tag: o.category }));
   return modal({
     title, size: "md", body: `<div class="field"><label>Lot facturé</label><input id="lp" value="${esc(initial)}" placeholder="Rechercher…" autofocus></div><p class="xs faint" style="margin-top:8px">Pour un lot mensuel (support, évolutions mineures), le suffixe « - MM/AA » est ajouté automatiquement s'il manque.</p>`,
     onMount: (ctx) => combobox($("#lp", ctx.el), () => opts),
@@ -452,7 +450,7 @@ async function doAction(act, i, m) {
   if (act === "goCharges") return go(`mois/${m}/charges`);
   if (act === "goCollabs") return go("collaborateurs");
   if (act === "assign") {
-    let lot = await lotPicker(`Affecter ${i.details.length} ligne(s) à un lot`, i.lot || "");
+    let lot = await lotPicker(`Affecter ${i.details.length} ligne(s) à un lot`, i.lot || "", m);
     if (!lot) return;
     let rules = {};
     try { rules = JSON.parse(S.settings.monthly_keywords || "{}"); } catch (_) { /* */ }

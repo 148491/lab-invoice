@@ -12,8 +12,9 @@ def options(conn, month: str) -> list[dict]:
     first = engine.month_first(month).isoformat()
     out, seen = [], set()
     for e in db.rows(conn, "SELECT * FROM epics ORDER BY category, label"):
-        closed = e["status"] == "ABANDONED" or (e["status"] == "PRODUCTION" and e["mel_date"] and e["mel_date"] < first)
-        if closed:
+        # ouvert = en cours, ou mis en ligne pendant ce mois-ci (dernières heures possibles)
+        open_ = e["status"] == "IN PROGRESS" or (e["status"] == "PRODUCTION" and e["mel_date"] and e["mel_date"] >= first)
+        if not open_:
             continue
         out.append({"value": e["label"], "lot": e["lot_name"], "kind": "epic", "category": e["category"] or "",
                     "key": e["epic_key"]})

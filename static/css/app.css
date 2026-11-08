@@ -423,3 +423,26 @@ table.t { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 
 .month-item.on { background: var(--brand-soft); color: var(--brand-ink); font-weight: 650; }
 .month-new { display: flex; gap: 6px; padding: 8px 4px 4px; margin-top: 4px; border-top: 1px solid var(--border); }
 @media (max-width: 760px) { .month-menu { position: fixed; left: 12px; right: 12px; top: 120px; width: auto; } }
+
+/* tri et filtres des tableaux */
+.t th.sortable { cursor: pointer; user-select: none; }
+.t th.sortable:hover { color: var(--text); }
+.t th .sort-ic { margin-left: 6px; font-size: 10px; opacity: .35; }
+.t th.sorted { color: var(--brand); }
+.t th.sorted .sort-ic { opacity: 1; }
+.filter-panel { padding: 14px 20px; border-bottom: 1px solid var(--border); background: var(--surface-2); }
+.filter-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.filter-grid input[type=date] { padding: 0 6px; }
+.filter-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 20px; }
+.filter-chips:not(:empty) { padding: 10px 20px; border-bottom: 1px solid var(--border); }
+.fchip { height: 26px; padding-right: 4px; }
+.fchip button { border: 0; background: transparent; color: inherit; cursor: pointer; display: grid; padding: 2px; border-radius: 50%; }
+.fchip button:hover { background: rgba(0,0,0,.08); }
+details.multi { position: relative; }
+details.multi summary { list-style: none; height: 36px; display: flex; align-items: center; padding: 0 11px; border: 1px solid var(--border-2); border-radius: 8px; background: var(--surface); cursor: pointer; font-size: 13.5px; }
+details.multi summary::-webkit-details-marker { display: none; }
+details.multi summary::after { content: "▾"; margin-left: auto; color: var(--text-3); }
+.multi-list { position: absolute; z-index: 30; left: 0; right: 0; top: calc(100% + 4px); min-width: 220px; max-height: 280px; overflow: auto; background: var(--surface); border: 1px solid var(--border-2); border-radius: 10px; box-shadow: var(--sh-3); padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+.multi-list label { display: flex; gap: 8px; padding: 5px 6px; border-radius: 6px; }
+.multi-list label:hover { background: var(--bg-2); }
+.multi-q { height: 30px; margin-bottom: 4px; }

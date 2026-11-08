@@ -144,3 +144,26 @@ def test_ai_settings_never_leak_keys(admin, monkeypatch):
     assert admin.put("/api/ai", json={"provider": "openai", "effort": "max"}).status_code == 400
     st = admin.put("/api/ai", json={"provider": "off", "keys": {"openai": ""}}).json()
     assert st["active"] is None and st["keys"]["openai"]["origin"] is None
+
+
+def test_entities_and_open_lots(admin):
+    c = admin
+    for name, ent in (("Alice Dev", "TF"), ("Carl Cx", "CX")):
+        c.post("/api/ref/collaborators", json={"name": name, "mode": "jira", "entity": ent})
+    c.post("/api/ref/epics", json={"label": "EPICS-2: NOUVEAU PROJET", "lot_name": "NOUVEAU PROJET", "category": "Project"})
+    c.post("/api/ref/epics", json={"label": "EPICS-3: VIEUX PROJET", "lot_name": "VIEUX PROJET", "status": "PRODUCTION", "mel_date": "2026-08-31"})
+    c.post("/api/ref/epics", json={"label": "EPICS-4: SANS DATE", "lot_name": "SANS DATE", "status": "PRODUCTION"})
+    c.post("/api/ref/epics", json={"label": "EPICS-5: LIVRE CE MOIS", "lot_name": "LIVRE CE MOIS", "status": "PRODUCTION", "mel_date": "2026-10-15"})
+    lots = {o["lot"] for o in c.get("/api/lots/options?month=2026-10").json()}
+    assert lots == {"NOUVEAU PROJET", "LIVRE CE MOIS"}
+
+    m = "2026-10"
+    pv = c.post(f"/api/months/{m}/timesheet/preview", data={"text": "Alice Dev\tMC-1\tT\tEPICS-2: NOUVEAU PROJET\t10\nCarl Cx\tMC-2\tT\tEPICS-2: NOUVEAU PROJET\t30\n"}).json()
+    c.post(f"/api/months/{m}/timesheet/commit", json={"token": pv["token"], "decisions": {}})
+    cpv = c.post(f"/api/months/{m}/costs/preview", data={"text": "Alice Dev\t1000\nCarl Cx\t500"}).json()
+    c.post(f"/api/months/{m}/costs/commit", json={"token": cpv["token"], "decisions": {}})
+    assert c.get(f"/api/months/{m}").json()["stats"]["hours"] == pytest.approx(40)
+    c.put("/api/settings", json={"billing_entity": "TF"})
+    r = c.get(f"/api/months/{m}").json()
+    assert r["stats"]["hours"] == pytest.approx(10) and r["stats"]["cost_total"] == pytest.approx(1000)
+    assert any(i["code"] == "outside_entity" and "Carl Cx" in i["message"] for i in r["issues"])
