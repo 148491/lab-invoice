@@ -410,3 +410,16 @@ table.t { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 
 }
 
 [hidden] { display: none !important; }
+
+/* sélecteur de mois */
+.month-pick { position: relative; }
+.month-btn { display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; color: inherit; font: inherit; padding: 2px 8px; margin: 0 -4px; border-radius: 8px; cursor: pointer; }
+.month-btn:hover, .month-btn[aria-expanded="true"] { background: var(--bg-2); }
+.month-btn .ic { color: var(--text-3); transition: transform .15s; }
+.month-btn[aria-expanded="true"] .ic { transform: rotate(180deg); }
+.month-menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 50; width: 320px; max-height: 420px; overflow-y: auto; background: var(--surface); border: 1px solid var(--border-2); border-radius: 12px; box-shadow: var(--sh-3); padding: 6px; animation: pop .12s var(--ease); }
+.month-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0; background: transparent; border-radius: 8px; font: inherit; font-size: 13.5px; color: var(--text); cursor: pointer; text-align: left; text-transform: capitalize; }
+.month-item:hover { background: var(--bg-2); }
+.month-item.on { background: var(--brand-soft); color: var(--brand-ink); font-weight: 650; }
+.month-new { display: flex; gap: 6px; padding: 8px 4px 4px; margin-top: 4px; border-top: 1px solid var(--border); }
+@media (max-width: 760px) { .month-menu { position: fixed; left: 12px; right: 12px; top: 120px; width: auto; } }

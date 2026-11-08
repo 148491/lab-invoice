@@ -130,7 +130,7 @@ def overview(conn, month: str) -> list[dict]:
     for c in db.rows(conn, "SELECT * FROM collaborators WHERE active=1 ORDER BY name"):
         a = agg.get(c["name"].casefold(), {"jira": 0.0, "manual": 0.0, "history": 0.0})
         total = sum(a.values())
-        out.append({"name": c["name"], "role": c["role"], "mode": c["mode"], "jira": a["jira"], "manual": a["manual"],
+        out.append({"name": c["name"], "role": c["role"], "mode": c["mode"], "jira": a["jira"] + a.get("history", 0), "manual": a["manual"],
                     "total": total, "expected": expected,
                     "submitted_at": st.get(c["name"].casefold(), {}).get("submitted_at") if st.get(c["name"].casefold()) else None})
     return out

@@ -329,3 +329,29 @@ def test_ai_list_models_filters(monkeypatch):
                      {"id": "whisper-1", "created": 1}, {"id": "o5-mini", "created": 4}, {"id": "gpt-6-realtime", "created": 5}]}
     monkeypatch.setattr(ai, "transport", httpx.MockTransport(lambda r: httpx.Response(200, json=data)))
     assert [m["id"] for m in ai.list_models("openai", "k")] == ["o5-mini", "gpt-6.1", "gpt-6"]
+
+
+def test_prorata_costed_fallback_and_manual_lots(conn):
+    import json as _j
+    m = "2026-10"
+    add(conn, m, "Alice Dev", "EPICS-2: NOUVEAU PROJET", 60)
+    add(conn, m, "Bob Dev", "EPICS-1: SITE - BUG FIXES", 20)
+    cost(conn, "2026-09", "Alice Dev", 5000)       # charges d'octobre pas encore chargées
+    cost(conn, "2026-09", "Bob Dev", 2000)
+    r = engine.compute(conn, m)
+    ivan = next(x for x in r["prorata"] if x["collaborator"] == "Ivan Dir")
+    assert ivan["base_hours"] == pytest.approx(80) and ivan["costed_source"] == "2026-09"
+    assert {l["lot"] for l in ivan["lots"]} == {"NOUVEAU PROJET", "SITE - BUG FIXES - 10/26"}
+
+    # ajustement manuel : 10 h projet, 30 h support → 25 % / 75 % du coût d'Ivan
+    cost(conn, m, "Alice Dev", 6000); cost(conn, m, "Bob Dev", 2000); cost(conn, m, "Ivan Dir", 1000)
+    db.get_month(conn, m)
+    conn.execute("UPDATE months SET prorata=? WHERE month=?",
+                 (_j.dumps({"Ivan Dir": {"lots": {"NOUVEAU PROJET": 10, "SITE - BUG FIXES - 10/26": 30}}}), m))
+    conn.commit()
+    r = engine.compute(conn, m)
+    ivan = next(x for x in r["prorata"] if x["collaborator"] == "Ivan Dir")
+    assert ivan["manual"] and ivan["hours"] == pytest.approx(40)
+    lines = {l["lot"]: l for l in r["invoice"]["lines"]}
+    by = lambda lot: next(d for d in lines[lot]["detail"] if d["collaborator"] == "Ivan Dir")["cost"]
+    assert by("NOUVEAU PROJET") == pytest.approx(250) and by("SITE - BUG FIXES - 10/26") == pytest.approx(750)

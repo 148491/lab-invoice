@@ -200,6 +200,19 @@ def compute(conn, month: str) -> dict:
     generated: dict[str, list[dict]] = {}
     prorata_info = []
     already = {e["collaborator"] for e in valid}   # historique : répartition déjà faite
+    # salariés « ayant un coût » : ceux du mois ; à défaut (charges pas encore chargées), ceux du dernier mois connu
+    costed = {n for n, v in costs.items() if abs(v) > 0.005}
+    costed_source = month if costed else None
+    if not costed:
+        prev = conn.execute("SELECT MAX(month) FROM costs WHERE month < ?", (month,)).fetchone()[0]
+        if prev:
+            costed = {resolve(r["collaborator"]) for r in db.rows(
+                conn, "SELECT collaborator, SUM(amount) a FROM costs WHERE month=? GROUP BY collaborator", (prev,))
+                if abs(r["a"]) > 0.005}
+            costed_source = prev
+    lot_meta = {}
+    for e in valid:
+        lot_meta.setdefault(e["lot"], (e["category"], e["sub_category"]))
     for c in sorted(collabs, key=lambda c: c["name"]):
         if not c["active"] or c["mode"] != "prorata" or c["name"] in already:
             continue
@@ -211,14 +224,27 @@ def compute(conn, month: str) -> dict:
             ec = collab_by_name.get(e["collaborator"])
             if ec is not None and ec["mode"] in ("prorata", "mirror"):
                 continue
-            if c["prorata_base"] == "costed" and abs(costs.get(e["collaborator"], 0)) < 0.005:
+            if c["prorata_base"] == "costed" and e["collaborator"] not in costed:
                 continue
             if c["prorata_base"] == "jira" and e["source"] != "jira":
                 continue
             base[(e["lot"], e["category"], e["sub_category"])] += e["hours"]
         bt = sum(base.values())
         gen = []
-        if bt > 0 and total > 0:
+        manual = {k: float(v) for k, v in (p.get("lots") or {}).items() if v not in (None, "") and float(v) > 0}
+        if manual:
+            # répartition ajustée à la main : les heures saisies par lot remplacent le calcul
+            for lot, h in manual.items():
+                if lot in lot_meta:
+                    cat, sub = lot_meta[lot]
+                else:
+                    cat, sub = (projects.get(lot.casefold()) or {}).get("category", ""), ""
+                gen.append({"id": None, "month": month, "collaborator": c["name"], "issue_key": "",
+                            "summary": "Répartition ajustée à la main", "epic": "", "lot": lot,
+                            "category": cat or "", "sub_category": sub or "", "hours": h,
+                            "source": "prorata", "auto": False})
+            total = sum(manual.values())
+        elif bt > 0 and total > 0:
             for (lot, cat, sub), h in base.items():
                 if h:
                     gen.append({"id": None, "month": month, "collaborator": c["name"], "issue_key": "",
@@ -228,7 +254,8 @@ def compute(conn, month: str) -> dict:
         generated[c["name"]] = gen
         prorata_info.append({"collaborator": c["name"], "holidays": holidays, "hours": total,
                              "hours_override": p.get("hours"), "base": c["prorata_base"], "base_hours": bt,
-                             "mode": "prorata"})
+                             "mode": "prorata", "manual": bool(manual),
+                             "costed_source": costed_source if c["prorata_base"] == "costed" else None})
     for c in collabs:
         if c["active"] and c["mode"] == "mirror" and c["name"] not in already:
             src = generated.get(c["mirror_of"] or "", None)

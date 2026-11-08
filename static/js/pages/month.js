@@ -31,7 +31,7 @@ export async function render(view, { params }) {
   };
   view.innerHTML = `
   <div class="page-head"><div class="grow"><div class="crumbs">${icon("invoice")}Facture du mois</div>
-      <div class="row" style="gap:8px"><button class="icon-btn" id="pm" aria-label="Mois précédent">${icon("chevL")}</button><h1>${month.label(m)}</h1><button class="icon-btn" id="nm" aria-label="Mois suivant">${icon("chevR")}</button>${statusChip(d.status)}</div></div>
+      <div class="row" style="gap:8px"><button class="icon-btn" id="pm" aria-label="Mois précédent">${icon("chevL")}</button><div class="month-pick"><button class="month-btn" id="mpick" aria-haspopup="listbox" aria-expanded="false"><h1>${month.label(m)}</h1>${icon("chevD")}</button><div class="month-menu" id="mmenu" role="listbox" hidden></div></div><button class="icon-btn" id="nm" aria-label="Mois suivant">${icon("chevR")}</button>${statusChip(d.status)}</div></div>
     <div class="toolbar">${locked && can("invoice") ? `<button class="btn" id="reopen">${icon("unlock")}Réouvrir</button>` : ""}
       <button class="btn" id="xlsx">${icon("download")}<span class="hide-mobile">Exporter</span> Excel</button></div></div>
   <div class="grid g4" style="margin-bottom:16px">
@@ -46,6 +46,23 @@ export async function render(view, { params }) {
   $("#pm", view).onclick = () => go(`mois/${month.prev(m)}/${tab}`);
   $("#nm", view).onclick = () => go(`mois/${month.next(m)}/${tab}`);
   $$(".step", view).forEach((b) => (b.onclick = () => go(`mois/${m}/${b.dataset.t}`)));
+  const menu = $("#mmenu", view), btn = $("#mpick", view);
+  const closeMenu = () => { menu.hidden = true; btn.setAttribute("aria-expanded", "false"); document.removeEventListener("mousedown", outside); };
+  const outside = (e) => { if (!e.target.closest(".month-pick")) closeMenu(); };
+  btn.onclick = () => {
+    if (!menu.hidden) return closeMenu();
+    const list = [...new Set([...S.months.map((x) => x.month), m])].sort().reverse();
+    const byM = Object.fromEntries(S.months.map((x) => [x.month, x]));
+    menu.innerHTML = list.map((k) => { const x = byM[k] || { status: "draft" }; return `<button class="month-item ${k === m ? "on" : ""}" role="option" data-m="${k}">
+        <span class="grow">${month.label(k)}</span>${x.total ? `<span class="xs faint num">${fmt.money0(x.total)}</span>` : ""}${x.status === "validated" ? `<span style="color:var(--success)">${icon("lock")}</span>` : chip("Brouillon", "warning")}</button>`; }).join("")
+      + `<div class="month-new"><input type="month" id="mnew" value="${month.next(list[0])}" aria-label="Autre mois"><button class="btn sm" id="mgo">${icon("arrowR")}Ouvrir</button></div>`;
+    menu.hidden = false; btn.setAttribute("aria-expanded", "true");
+    menu.querySelector(".month-item.on")?.scrollIntoView({ block: "nearest" });
+    menu.querySelectorAll("[data-m]").forEach((b) => (b.onclick = () => { closeMenu(); go(`mois/${b.dataset.m}/${tab}`); }));
+    $("#mgo", menu).onclick = () => { const v = $("#mnew", menu).value; if (month.valid(v)) { closeMenu(); go(`mois/${v}/${tab}`); } };
+    setTimeout(() => document.addEventListener("mousedown", outside));
+  };
+  btn.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenu(); });
   $("#xlsx", view).onclick = () => download(`/api/months/${m}/invoice.xlsx`);
   $("#reopen", view)?.addEventListener("click", async () => {
     if (!(await confirmDialog("Réouvrir le mois ?", "La facture figée sera recalculée à partir des données actuelles. Les temps et charges redeviennent modifiables.", { ok: "Réouvrir" }))) return;
@@ -278,23 +295,81 @@ async function reviewCosts(pv, m) {
 // =================================================================== RÉPARTITIONS
 async function tabProrata(el, d, m, locked) {
   const p = d.params.prorata || {};
+  const editing = tabProrata.editing || (tabProrata.editing = {});
+  const draft = tabProrata.draft || (tabProrata.draft = {});
+  const save = async (np, msg = "Enregistré") => { await api(`/api/months/${m}`, { method: "PUT", json: { prorata: np } }); toast(msg, "success"); rerender(); };
+  const card = (x) => {
+    const who = x.collaborator, isEdit = editing[who] && !locked;
+    const rows = isEdit ? draft[who] : (x.lots || []);
+    const total = rows.reduce((a, r) => a + (fmt.parse(r.hours) || 0), 0);
+    const baseLbl = x.mode === "mirror" ? `Identique à ${esc(x.mirror_of)}`
+      : x.base === "jira" ? "Base : heures Jira de l'équipe"
+      : `Base : salariés ayant un coût${x.costed_source && x.costed_source !== m ? ` (liste de ${month.label(x.costed_source)}, charges du mois pas encore chargées)` : ""}`;
+    return `<div class="card" data-who="${esc(who)}"><div class="card-head">${avatar(who)}<div class="grow"><h2>${esc(who)}</h2><div class="desc">${baseLbl}</div></div>
+      ${x.manual ? chip("Ajustée à la main", "warning", "edit") : chip(x.mode === "mirror" ? "Miroir" : "Prorata", "brand")}</div>
+      <div class="card-body">
+      ${x.mode === "mirror" || x.manual || isEdit ? "" : `<div class="row" style="margin-bottom:12px"><div class="field" style="flex:1"><label>Jours d'absence</label><input data-k="holidays" type="number" step="0.5" value="${p[who]?.holidays ?? ""}" placeholder="0" ${locked ? "disabled" : ""}></div>
+        <div class="field" style="flex:1"><label>ou total forcé (h)</label><input data-k="hours" type="number" step="0.5" value="${p[who]?.hours ?? ""}" placeholder="${fmt.num(x.hours)}" ${locked ? "disabled" : ""}></div></div>`}
+      <div class="row between" style="margin-bottom:8px"><span class="muted small">Total réparti</span><b>${fmt.h(isEdit ? total : x.hours)}</b></div>
+      <div class="list" style="max-height:${isEdit ? 420 : 260}px;overflow:auto;border:1px solid var(--border);border-radius:10px">
+        ${rows.map((r, i) => isEdit
+          ? `<div class="list-item" style="padding:5px 8px;gap:6px" data-i="${i}"><div class="grow xs ellipsis" title="${esc(r.lot)}">${esc(r.lot)}</div>
+              <input class="in-cell amount" style="width:78px" inputmode="decimal" data-h value="${esc(String(r.hours).replace(".", ","))}">
+              <span class="xs faint" style="width:40px;text-align:right">${total ? fmt.pct((fmt.parse(r.hours) || 0) / total, 0) : ""}</span>
+              <button class="icon-btn" data-rm aria-label="Retirer" style="width:26px;height:26px">${icon("x")}</button></div>`
+          : `<div class="list-item" style="padding:7px 12px"><div class="grow xs ellipsis" title="${esc(r.lot)}">${esc(r.lot)}</div><span class="xs num">${fmt.num(r.hours)} h</span><span class="xs num faint" style="width:70px">${fmt.money0(r.cost)}</span></div>`).join("")
+          || `<div class="faint small" style="padding:14px">Aucune heure d'équipe à répartir pour l'instant.</div>`}
+      </div>
+      ${isEdit ? `<div class="row" style="margin-top:10px"><input data-add placeholder="Ajouter un lot…" style="flex:1"></div>
+        <p class="xs faint" style="margin:8px 0 0">Modifiez les heures par lot : le coût de ${esc(who)} sera réparti selon ces proportions.</p>` : ""}
+      </div>
+      ${locked || x.mode === "mirror" ? "" : `<div class="card-foot">${isEdit
+        ? `<button class="btn sm" data-cancel>Annuler</button><button class="btn sm primary" data-save>${icon("check")}Enregistrer la répartition</button>`
+        : x.manual
+          ? `<button class="btn sm" data-reset>${icon("history")}Revenir au calcul automatique</button><button class="btn sm" data-edit>${icon("edit")}Modifier</button>`
+          : `<button class="btn sm" data-edit ${(x.lots || []).length ? "" : "disabled"}>${icon("edit")}Ajuster à la main</button>`}</div>`}
+    </div>`;
+  };
   el.innerHTML = `
   <div class="card card-pad" style="margin-bottom:16px"><div class="row" style="align-items:flex-end">
     <div class="field" style="max-width:200px"><label>Jours ouvrés du mois</label><input id="wd" type="number" step="0.5" value="${d.params.working_days ?? ""}" placeholder="${d.working_days_default}" ${locked ? "disabled" : ""}></div>
     <p class="small muted grow" style="margin:0">Par défaut ${d.working_days_default} jours (dimanche → jeudi). Total d'un collaborateur au prorata = (jours ouvrés − absences) × ${d.hours_per_day} h.</p></div></div>
-  <div class="alert alert-info" style="margin-bottom:16px">${icon("info")}<div>Ces personnes ne saisissent pas leurs temps : leur coût est réparti sur les lots <b>au prorata des heures de l'équipe</b>. Seule la proportion compte pour le coût ; le total d'heures sert à l'affichage.</div></div>
-  <div class="grid g3">${d.prorata.map((x) => `<div class="card" data-who="${esc(x.collaborator)}"><div class="card-head">${avatar(x.collaborator)}<div class="grow"><h2>${esc(x.collaborator)}</h2><div class="desc">${x.mode === "mirror" ? `Identique à ${esc(x.mirror_of)}` : x.base === "jira" ? "Base : heures Jira de l'équipe" : "Base : salariés ayant un coût"}</div></div>${chip(x.mode === "mirror" ? "Miroir" : "Prorata", "brand")}</div>
-    <div class="card-body">${x.mode === "mirror" ? "" : `<div class="row" style="margin-bottom:12px"><div class="field" style="flex:1"><label>Jours d'absence</label><input data-k="holidays" type="number" step="0.5" value="${p[x.collaborator]?.holidays ?? ""}" placeholder="0" ${locked ? "disabled" : ""}></div>
-      <div class="field" style="flex:1"><label>ou total forcé (h)</label><input data-k="hours" type="number" step="0.5" value="${p[x.collaborator]?.hours ?? ""}" placeholder="${fmt.num(x.hours)}" ${locked ? "disabled" : ""}></div></div>`}
-      <div class="row between" style="margin-bottom:8px"><span class="muted small">Total réparti</span><b>${fmt.h(x.hours)}</b></div>
-      <div class="list" style="max-height:240px;overflow:auto;border:1px solid var(--border);border-radius:10px">${(x.lots || []).slice(0, 40).map((r) => `<div class="list-item" style="padding:7px 12px"><div class="grow xs ellipsis" title="${esc(r.lot)}">${esc(r.lot)}</div><span class="xs num">${fmt.num(r.hours)} h</span><span class="xs num faint" style="width:70px">${fmt.money0(r.cost)}</span></div>`).join("") || `<div class="faint small" style="padding:14px">Aucune heure d'équipe à répartir.</div>`}</div></div></div>`).join("") || `<div class="card">${empty("Aucune répartition", "Aucun collaborateur en mode prorata ou miroir (Référentiels › Collaborateurs).", "pie")}</div>`}</div>`;
+  <div class="alert alert-info" style="margin-bottom:16px">${icon("info")}<div>Ces personnes ne saisissent pas leurs temps : leur coût est réparti sur les lots <b>au prorata des heures de l'équipe</b>. Vous pouvez ensuite <b>ajuster la répartition à la main</b>, lot par lot, selon ce que vous savez. Seule la proportion compte pour le coût.</div></div>
+  <div class="grid g3">${d.prorata.map(card).join("") || `<div class="card">${empty("Aucune répartition", "Aucun collaborateur en mode prorata ou miroir (Référentiels › Collaborateurs).", "pie")}</div>`}</div>`;
   if (locked) return;
   $("#wd", el).onchange = async (e) => { await api(`/api/months/${m}`, { method: "PUT", json: { working_days: e.target.value === "" ? null : +e.target.value } }); toast("Enregistré", "success"); rerender(); };
-  $$("[data-who] input[data-k]", el).forEach((inp) => inp.addEventListener("change", async () => {
-    const who = inp.closest("[data-who]").dataset.who, np = { ...p };
-    np[who] = { ...(np[who] || {}), [inp.dataset.k]: inp.value === "" ? null : +inp.value };
-    await api(`/api/months/${m}`, { method: "PUT", json: { prorata: np } }); toast("Enregistré", "success"); rerender();
-  }));
+  const redraw = () => tabProrata(el, d, m, locked);
+  $$("[data-who]", el).forEach((c) => {
+    const who = c.dataset.who, x = d.prorata.find((y) => y.collaborator === who);
+    c.querySelectorAll("input[data-k]").forEach((inp) => inp.addEventListener("change", () => {
+      const np = { ...p }; np[who] = { ...(np[who] || {}), [inp.dataset.k]: inp.value === "" ? null : +inp.value }; save(np);
+    }));
+    c.querySelector("[data-edit]")?.addEventListener("click", () => {
+      draft[who] = (x.lots || []).map((r) => ({ lot: r.lot, hours: Math.round(r.hours * 100) / 100 })); editing[who] = true; redraw();
+    });
+    c.querySelector("[data-cancel]")?.addEventListener("click", () => { editing[who] = false; redraw(); });
+    c.querySelector("[data-reset]")?.addEventListener("click", async () => {
+      if (!(await confirmDialog("Revenir au calcul automatique ?", `La répartition ajustée de <b>${esc(who)}</b> sera remplacée par le calcul au prorata des heures de l'équipe.`, { ok: "Revenir" }))) return;
+      const np = { ...p }; np[who] = { ...(np[who] || {}) }; delete np[who].lots; save(np, "Répartition automatique rétablie");
+    });
+    c.querySelector("[data-save]")?.addEventListener("click", () => {
+      const lots = {}; draft[who].forEach((r) => { const h = fmt.parse(r.hours); if (h > 0) lots[r.lot] = (lots[r.lot] || 0) + h; });
+      if (!Object.keys(lots).length) return toast("Indiquez des heures sur au moins un lot.", "error");
+      editing[who] = false;
+      const np = { ...p }; np[who] = { ...(np[who] || {}), lots }; save(np, `Répartition de ${who} enregistrée`);
+    });
+    c.querySelectorAll("[data-i]").forEach((row) => {
+      const i = +row.dataset.i;
+      row.querySelector("[data-h]").addEventListener("change", (e) => { draft[who][i].hours = e.target.value; redraw(); });
+      row.querySelector("[data-rm]").addEventListener("click", () => { draft[who].splice(i, 1); redraw(); });
+    });
+    const add = c.querySelector("[data-add]");
+    if (add) {
+      const opts = [...new Set(d.invoice.lines.map((l) => l.lot).concat(...d.prorata.map((y) => (y.lots || []).map((r) => r.lot))))]
+        .sort().map((l) => ({ value: l, label: l }));
+      combobox(add, () => opts.filter((o) => !draft[who].some((r) => r.lot === o.value)), (o) => { draft[who].push({ lot: o.value, hours: 0 }); redraw(); });
+    }
+  });
 }
 
 // =================================================================== CAPEX & FRAIS GÉNÉRAUX
