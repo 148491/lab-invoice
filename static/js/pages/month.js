@@ -541,18 +541,46 @@ async function doAction(act, i, m) {
 }
 
 // =================================================================== FACTURE
+/** Imprime uniquement la facture, en vue client, mise en page compacte (A4), sur une page quand c'est lisible. */
+function printInvoice(node) {
+  const area = document.createElement("div");
+  area.id = "printArea";
+  const clone = node.cloneNode(true);
+  clone.classList.add("hide-internal");
+  clone.querySelectorAll("tr.det, .chev, .no-print").forEach((x) => x.remove());
+  area.appendChild(clone);
+  document.body.appendChild(area);
+  // tenir sur une page A4 si possible : réduction d'échelle jusqu'à 70 % au plus (au-delà, plusieurs pages lisibles)
+  area.classList.add("measuring");
+  const PAGE_H = 1054;                           // hauteur utile A4 (297 mm − marges) en px CSS
+  const h = clone.getBoundingClientRect().height;
+  const z = h > PAGE_H && PAGE_H / h >= 0.7 ? Math.floor(PAGE_H / h * 100) / 100 - 0.01 : 1;
+  if (z < 1) clone.style.zoom = z;
+  area.classList.remove("measuring");
+  const theme = document.documentElement.dataset.theme;
+  document.documentElement.dataset.theme = "light";          // impression toujours sur fond blanc
+  document.body.classList.add("print-invoice");
+  const done = () => { document.body.classList.remove("print-invoice"); area.remove(); document.documentElement.dataset.theme = theme; removeEventListener("afterprint", done); };
+  addEventListener("afterprint", done);
+  setTimeout(() => { window.print(); setTimeout(() => { if (document.body.contains(area) && !matchMedia("print").matches) done(); }, 1000); }, 50);
+}
+
 const open = new Set();
 let showInternal = true;
 async function tabFacture(el, d, m, locked) {
   const inv = d.invoice, st = S.settings;
   const secs = [["projet", "Projets & évolutions"], ["support", "Support & bug fixes"]];
-  const line = (l) => `<tr class="clickable" data-lot="${esc(l.lot)}"><td><span class="faint">${open.has(l.lot) ? "▾" : "▸"}</span> ${esc(l.lot)}</td><td class="hide-mobile">${statusChip(l.status)}</td><td class="hide-mobile nowrap">${esc(l.date_label)}</td>
+  const canStatus = !locked && can("ref");
+  const statusCell = (l) => (canStatus && !l.recurring
+    ? `<select class="inv-status no-print" data-st="${esc(l.lot)}" aria-label="Statut de ${esc(l.lot)}">${[["IN PROGRESS", "En cours"], ["PRODUCTION", "En ligne"], ["ABANDONED", "Abandonné"]].map(([v, t]) => `<option value="${v}" ${l.status === v ? "selected" : ""}>${t}</option>`).join("")}</select><span class="print-only">${statusChip(l.status)}</span>`
+    : statusChip(l.status));
+  const line = (l) => `<tr class="clickable" data-lot="${esc(l.lot)}"><td><span class="faint chev">${open.has(l.lot) ? "▾" : "▸"}</span> ${esc(l.lot)}</td><td class="hide-mobile">${statusCell(l)}</td><td class="hide-mobile nowrap">${esc(l.date_label)}</td>
       <td class="num"><b>${fmt.money(l.price)}</b></td><td class="num internal">${fmt.money(l.salary)}</td><td class="num internal">${fmt.pct(l.pct, 2)}</td><td class="num internal">${fmt.money(l.overhead)}</td></tr>`
     + (open.has(l.lot) ? l.detail.map((x) => `<tr class="det"><td colspan="3" style="padding-left:30px">${esc(x.collaborator)} · ${fmt.num(x.hours)} h</td><td></td><td class="num internal">${fmt.money(x.cost)}</td><td class="internal"></td><td class="internal"></td></tr>`).join("") : "");
   el.innerHTML = `<div class="row no-print" style="margin-bottom:14px">
       <div class="seg"><button class="${showInternal ? "on" : ""}" data-int="1">Vue détaillée</button><button class="${showInternal ? "" : "on"}" data-int="0">Vue client</button></div>
       <div style="flex:1"></div>
-      <button class="btn" onclick="window.print()">${icon("printer")}<span class="hide-mobile">Imprimer / </span>PDF</button>
+      <button class="btn" id="printInv">${icon("printer")}<span class="hide-mobile">Imprimer / </span>PDF</button>
       ${locked ? "" : can("invoice") ? `${d.blocking ? `<button class="btn" id="force">Valider malgré les alertes</button>` : ""}<button class="btn success" id="val" ${d.blocking ? "disabled" : ""}>${icon("lock")}Valider la facture</button>` : ""}</div>
     ${d.blocking && !locked ? `<div class="alert alert-warning no-print" style="margin-bottom:14px">${icon("alert")}<div class="grow">Aperçu provisoire : il reste des contrôles bloquants. <a href="#/mois/${m}/controles">Voir les contrôles</a></div></div>` : ""}
     <div class="invoice ${showInternal ? "" : "hide-internal"}">
@@ -569,7 +597,13 @@ async function tabFacture(el, d, m, locked) {
       </tbody></table></div>` : empty("Facture vide", "Importez les temps et les charges du mois.", "invoice")}
       <div class="inv-foot">${esc(st.issuer_footer)}</div></div>`;
   $$("[data-int]", el).forEach((b) => (b.onclick = () => { showInternal = b.dataset.int === "1"; tabFacture(el, d, m, locked); }));
-  $$("tr[data-lot]", el).forEach((tr) => (tr.onclick = () => { const l = tr.dataset.lot; open.has(l) ? open.delete(l) : open.add(l); tabFacture(el, d, m, locked); }));
+  $$("tr[data-lot]", el).forEach((tr) => (tr.onclick = (e) => { if (e.target.closest("select")) return; const l = tr.dataset.lot; open.has(l) ? open.delete(l) : open.add(l); tabFacture(el, d, m, locked); }));
+  $$("select[data-st]", el).forEach((sel) => (sel.onchange = async () => {
+    const r = await api(`/api/months/${m}/lot-status`, { method: "POST", json: { lot: sel.dataset.st, status: sel.value } });
+    toast(sel.value === "PRODUCTION" ? `« ${sel.dataset.st} » en ligne au ${fmt.date(r.mel_date)}` : "Statut du projet mis à jour", "success");
+    rerender();
+  }));
+  $("#printInv", el).onclick = () => printInvoice($(".invoice", el));
   const validate = async (force) => {
     if (!(await confirmDialog(force ? "Valider malgré les alertes ?" : "Valider la facture ?", `Total <b>${fmt.money(inv.total.price)}</b>. Le mois sera figé et les lots mensuels inscrits comme livrés au ${fmt.date(inv.date)}.`, { ok: "Valider", danger: force }))) return;
     await api(`/api/months/${m}/validate?force=${force}`, { method: "POST" });

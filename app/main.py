@@ -520,6 +520,29 @@ def patch_entry(entry_id: int, e: dict = Body(...), user=TIME_ALL):
     return {"ok": True}
 
 
+@app.post("/api/months/{month}/lot-status")
+def lot_status(month: str, body: dict = Body(...), user=REF):
+    """Statut d'un projet depuis la facture : « En ligne » = mis en ligne le dernier jour du mois facturé.
+
+    Le projet (référentiel Projets) et les epics Jira de ce lot sont mis à jour ensemble.
+    """
+    _month(month)
+    _editable(month)
+    lot = (body.get("lot") or "").strip()
+    status = body.get("status")
+    if not lot or status not in ("IN PROGRESS", "PRODUCTION", "ABANDONED"):
+        raise HTTPException(400, "Lot et statut attendus")
+    mel = engine.month_last(month).isoformat() if status == "PRODUCTION" else None
+    with db.tx(conn):
+        cat = conn.execute("SELECT category, sub_category FROM epics WHERE lot_name = ? COLLATE NOCASE LIMIT 1", (lot,)).fetchone()
+        conn.execute("INSERT INTO projects(lot, status, mel_date, category, sub_category) VALUES (?,?,?,?,?) "
+                     "ON CONFLICT(lot) DO UPDATE SET status=excluded.status, mel_date=excluded.mel_date",
+                     (lot, status, mel, cat["category"] if cat else "", cat["sub_category"] if cat else ""))
+        conn.execute("UPDATE epics SET status=?, mel_date=? WHERE lot_name = ? COLLATE NOCASE", (status, mel, lot))
+    db.audit(conn, user, "projet.statut", month, {"lot": lot, "statut": status, "mise_en_ligne": mel})
+    return {"ok": True, "mel_date": mel}
+
+
 @app.post("/api/entries/bulk-lot")
 def bulk_lot(payload: dict = Body(...), user=TIME_ALL):
     ids = [int(i) for i in payload.get("ids", [])]
