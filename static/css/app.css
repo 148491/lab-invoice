@@ -579,3 +579,6 @@ details.multi summary::after { content: "▾"; margin-left: auto; color: var(--t
 .attach > div { flex-basis: 100%; }
 .att { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--border-2); background: var(--surface-2); border-radius: 10px; padding: 7px 12px; font: inherit; font-size: 13px; color: var(--text); cursor: pointer; }
 .att:hover { border-color: var(--brand); color: var(--brand); }
+
+.imp-btn { width: 30px; height: 30px; margin-left: 4px; color: var(--brand); flex: none; }
+.imp-btn:hover { background: var(--brand-soft); }

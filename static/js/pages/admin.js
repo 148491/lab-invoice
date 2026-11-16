@@ -12,14 +12,21 @@ export async function render(view, { arg }) {
 async function users(view) {
   const [{ users, roles, perms }, collabs] = await Promise.all([api("/api/users"), api("/api/ref/collaborators")]);
   const canImp = S.user.perms.includes("impersonate");
+  const impOk = (u) => canImp && u.active && u.role !== "admin" && u.id !== S.user.id;
+  const impersonate = async (u) => {
+    if (!(await confirmDialog(`Voir l'application comme ${u.display_name} ?`, `Vous verrez exactement ce que voit ${esc(u.display_name)} (${esc(u.role_label)}) : ses menus, ses pages et ses données, en lecture seule, pendant 2 heures au plus. Un bandeau en haut de l'écran permet de revenir à votre compte. L'action est inscrite au journal.`, { ok: "Voir comme cette personne" }))) return;
+    await api(`/api/users/${u.id}/impersonate`, { method: "POST" });
+    location.hash = ""; location.reload();
+  };
   view.innerHTML = `<div class="page-head"><div class="grow"><div class="crumbs">${icon("shield")}Administration</div><h1>Comptes & droits</h1><div class="sub">Qui peut se connecter et ce que chacun peut faire.</div></div>
       <div class="toolbar"><button class="btn" id="bulk">${icon("users")}Créer les comptes de l'équipe</button><button class="btn primary" id="add">${icon("userPlus")}Nouveau compte</button></div></div>
     <div class="grid g4" style="margin-bottom:16px">${Object.entries(roles).map(([k, r]) => `<div class="kpi"><div class="kpi-label">${icon(k === "admin" ? "shield" : k === "collaborateur" ? "clock" : "users")}${esc(r.label)}</div><div class="kpi-value">${users.filter((u) => u.role === k && u.active).length}</div><div class="kpi-sub">${r.locked ? "tous les droits" : `${r.perms.length} droit${r.perms.length > 1 ? "s" : ""} sur ${perms.length}`} · comptes actifs</div></div>`).join("")}</div>
+    ${canImp ? `<div class="alert alert-info" style="margin-bottom:12px">${icon("eye")}<div>Pour voir l'application exactement comme une personne, cliquez sur l'icône ${icon("eye")} à côté de son nom, ou ouvrez son compte puis « Voir en tant que ». Non disponible pour les administrateurs, qui voient déjà tout.</div></div>` : ""}
     <div class="card"><div class="table-wrap tall"><table class="t responsive"><thead><tr><th>Utilisateur</th><th>Identifiant</th><th>Rôle</th><th>Collaborateur rattaché</th><th>Dernière connexion</th><th>Statut</th><th></th></tr></thead><tbody>
-    ${users.map((u, i) => `<tr class="clickable" data-i="${i}"><td class="primary-cell" data-l=""><div class="person">${avatar(u.display_name)}<b>${esc(u.display_name)}</b></div></td><td data-l="Identifiant" class="mono">${esc(u.username)}</td>
+    ${users.map((u, i) => `<tr class="clickable" data-i="${i}"><td class="primary-cell" data-l=""><div class="person">${avatar(u.display_name)}<b>${esc(u.display_name)}</b>${impOk(u) ? `<button class="icon-btn imp-btn" data-imp="${u.id}" title="Voir l'application comme ${esc(u.display_name)} (lecture seule)" aria-label="Voir l'application comme ${esc(u.display_name)}">${icon("eye")}</button>` : ""}</div></td><td data-l="Identifiant" class="mono">${esc(u.username)}</td>
       <td data-l="Rôle">${chip(u.role_label, u.role === "admin" ? "brand" : "")}</td><td data-l="Collaborateur">${u.collaborator ? esc(u.collaborator) : '<span class="faint">—</span>'}</td>
       <td data-l="Connexion" class="small">${u.last_login ? fmt.datetime(u.last_login) : '<span class="faint">jamais</span>'}</td><td data-l="Statut">${u.active ? (u.must_change ? chip("Mot de passe à changer", "warning") : chip("Actif", "success")) : chip("Désactivé")}</td>
-      <td class="actions nowrap">${canImp && u.active && u.role !== "admin" && u.id !== S.user.id ? `<button class="btn sm ghost" data-imp="${u.id}" title="Voir l'application exactement comme ${esc(u.display_name)} (lecture seule)">${icon("eye")}Voir en tant que</button>` : ""}${icon("chevR", "faint")}</td></tr>`).join("")}
+      <td class="actions">${icon("chevR", "faint")}</td></tr>`).join("")}
     </tbody></table></div></div>
     <div class="card" style="margin-top:16px"><div class="card-head"><div class="grow"><h2>Droits par rôle</h2><div class="desc">Cochez les droits de chaque rôle puis enregistrez. L'administrateur garde toujours tous les droits. Les changements s'appliquent immédiatement à tous les comptes du rôle.</div></div>
       <button class="btn sm ghost" id="permReset">${icon("history")}Valeurs par défaut</button><button class="btn sm primary" id="permSave" disabled>${icon("check")}Enregistrer</button></div>
@@ -40,13 +47,7 @@ async function users(view) {
     if (!(await confirmDialog("Rétablir les droits par défaut ?", "Les personnalisations de tous les rôles seront effacées."))) return;
     await api("/api/roles", { method: "DELETE" }); toast("Droits par défaut rétablis", "success"); rerender();
   };
-  $$("[data-imp]", view).forEach((b) => b.onclick = async (e) => {
-    e.stopPropagation();
-    const u = users.find((x) => x.id === +b.dataset.imp);
-    if (!(await confirmDialog(`Se connecter en tant que ${u.display_name} ?`, `Vous verrez l'application exactement comme ${esc(u.display_name)} (${esc(u.role_label)}), en lecture seule, pendant 2 heures au plus. Un bandeau permet de revenir à votre compte. L'action est inscrite au journal.`, { ok: "Se connecter" }))) return;
-    await api(`/api/users/${u.id}/impersonate`, { method: "POST" });
-    location.hash = ""; location.reload();
-  });
+  $$("[data-imp]", view).forEach((b) => b.onclick = (e) => { e.stopPropagation(); impersonate(users.find((x) => x.id === +b.dataset.imp)); });
   const roleOpts = Object.entries(roles).map(([k, r]) => [k, r.label]);
   const collabOpts = [["", "— Aucun —"], ...collabs.filter((c) => c.active).map((c) => [c.name, c.name])];
   const userForm = (u) => modal({
@@ -58,7 +59,7 @@ async function users(view) {
       ${field({ name: "collaborator", label: "Collaborateur rattaché", type: "select", options: collabOpts, value: u?.collaborator || "", help: "Pour saisir ses propres temps." })}
       ${field({ name: "password", label: u ? "Nouveau mot de passe (facultatif)" : "Mot de passe provisoire", type: "text", required: !u, minlength: 8, value: u ? "" : genPassword(), help: "La personne devra le changer à sa première connexion.", full: true })}
       ${u ? field({ name: "active", label: "Compte actif", type: "checkbox", value: u.active, full: true }) : ""}</form>`,
-    actions: [{ label: "Annuler" }, { label: "Enregistrer", kind: "primary", onClick: async (ctx) => {
+    actions: [...(u && impOk(u) ? [{ label: "Voir en tant que", icon: "eye", onClick: (ctx) => { ctx.close(null); impersonate(u); return false; } }] : []), { label: "Annuler" }, { label: "Enregistrer", kind: "primary", onClick: async (ctx) => {
       const f = $("form", ctx.el); if (!f.reportValidity()) return false;
       const d = Object.fromEntries(new FormData(f));
       d.active = u ? $("[name=active]", f).checked : true;
