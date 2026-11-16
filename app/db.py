@@ -163,6 +163,12 @@ DEFAULT_SETTINGS = {
     "expected_tolerance": "0.2",
     # Entité facturée : seuls ses collaborateurs (temps et coûts) entrent dans la facture ; vide = tous
     "billing_entity": "",
+    # Envoi de la facture par mail : derniers destinataires, carnet d'adresses et modèle (vide = modèle par défaut)
+    "mail_to": "",
+    "mail_cc": "",
+    "mail_history": "[]",
+    "mail_subject": "",
+    "mail_body": "",
 }
 
 

@@ -111,6 +111,28 @@ def test_full_month_flow_with_review(admin):
     assert ws["B12"].value == "NOUVEAU PROJET" and ws["E12"].value == pytest.approx(1800)
     assert c.get("/").status_code == 200
 
+    # documents de la facture validée et brouillon de mail
+    px = openpyxl.load_workbook(io.BytesIO(c.get(f"/api/months/{m}/projects.xlsx").content)).active
+    vals = [r[0] for r in px.iter_rows(values_only=True) if r[0]]
+    assert any("Projets & évolutions" in str(v) for v in vals) and "NOUVEAU PROJET" in vals and "Total facture" in vals
+    pdf = c.get(f"/api/months/{m}/invoice.pdf")
+    assert pdf.status_code == 200 and pdf.content[:5] == b"%PDF-"
+    st = c.get(f"/api/months/{m}/mail").json()
+    assert st["to"] == "" and "{numero}" in st["subject_template"] and st["placeholders"]["mois"] == "octobre 2026"
+    assert c.post(f"/api/months/{m}/mail.eml", json={"to": "pas-une-adresse", "subject": "x", "body": "y"}).status_code == 400
+    r = c.post(f"/api/months/{m}/mail.eml", json={"to": "compta@client.com; boss@client.com", "cc": "moi@lab.com",
+                                                  "subject": st["subject"], "body": st["body"]})
+    assert r.status_code == 200
+    import email
+    msg = email.message_from_bytes(r.content)
+    assert msg["X-Unsent"] == "1" and msg["To"] == "compta@client.com, boss@client.com" and msg["Cc"] == "moi@lab.com"
+    names = sorted(part.get_filename() for part in msg.walk() if part.get_filename())
+    assert len(names) == 2 and names[0].endswith(".pdf") and names[1].startswith("Projets-")
+    st2 = c.get(f"/api/months/{m}/mail").json()
+    assert st2["to"] == "compta@client.com, boss@client.com" and "moi@lab.com" in st2["history"]
+    assert c.put("/api/mail/template", json={"subject": "Facture {numero}", "body": "Total {total}"}).status_code == 200
+    assert c.get(f"/api/months/{m}/mail").json()["subject"].startswith("Facture ")
+
     an = c.get("/api/analytics").json()
     assert [x["m"] for x in an["months"]] == [m]
     lot = next(x for x in an["lots"] if x["lot"] == "NOUVEAU PROJET")

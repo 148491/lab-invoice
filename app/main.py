@@ -13,7 +13,7 @@ from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Request, 
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import ai, analytics, auth, bootstrap, db, engine, export, importers, review, sheets
+from . import ai, analytics, auth, bootstrap, db, documents, engine, export, importers, review, sheets
 from .names import Resolver
 
 STATIC = Path(__file__).resolve().parent.parent / "static"
@@ -456,6 +456,110 @@ def invoice_xlsx(month: str, user=VIEW):
     d = res["invoice"]["date"].replace("-", "")
     return Response(data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": f'attachment; filename="Facture-{month}-{d}.xlsx"'})
+
+
+# ================================================================== documents d'une facture validée et envoi par mail
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _validated(month: str) -> dict:
+    _month(month)
+    if db.get_month(conn, month, create=False)["status"] != "validated":
+        raise HTTPException(409, "Validez d'abord la facture.")
+    return engine.result(conn, month)
+
+
+def _put_setting(k: str, v: str) -> None:
+    conn.execute("INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (k, v))
+
+
+@app.get("/api/months/{month}/projects.xlsx")
+def projects_xlsx(month: str, user=VIEW):
+    res = _validated(month)
+    return Response(documents.projects_workbook(res, db.settings(conn)), media_type=XLSX,
+                    headers={"Content-Disposition": f'attachment; filename="Projets-{documents.file_base(res)}.xlsx"'})
+
+
+@app.get("/api/months/{month}/invoice.pdf")
+def invoice_pdf(month: str, user=VIEW):
+    res = _validated(month)
+    return Response(documents.invoice_pdf(res, db.settings(conn)), media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{documents.file_base(res)}.pdf"'})
+
+
+def _mail_state(res: dict) -> dict:
+    st = db.settings(conn)
+    subj_t = st.get("mail_subject") or documents.DEFAULT_SUBJECT
+    body_t = st.get("mail_body") or documents.DEFAULT_BODY
+    vals = documents.placeholders(res, st)
+    base = documents.file_base(res)
+    return {"to": st.get("mail_to", ""), "cc": st.get("mail_cc", ""),
+            "history": json.loads(st.get("mail_history") or "[]"),
+            "subject_template": subj_t, "body_template": body_t,
+            "subject": documents.render(subj_t, vals), "body": documents.render(body_t, vals),
+            "placeholders": vals, "attachments": [f"{base}.pdf", f"Projets-{base}.xlsx"]}
+
+
+@app.get("/api/months/{month}/mail")
+def mail_get(month: str, user=INVOICE):
+    return _mail_state(_validated(month))
+
+
+def _remember_recipients(to: list[str], cc: list[str]) -> None:
+    hist = json.loads(db.settings(conn).get("mail_history") or "[]")
+    for a in to + cc:
+        if a.lower() not in (h.lower() for h in hist):
+            hist.append(a)
+    with db.tx(conn):
+        _put_setting("mail_to", ", ".join(to))
+        _put_setting("mail_cc", ", ".join(cc))
+        _put_setting("mail_history", json.dumps(hist[-50:]))
+
+
+def _recipients(body: dict) -> tuple[list[str], list[str]]:
+    try:
+        to, cc = documents.parse_addresses(body.get("to", "")), documents.parse_addresses(body.get("cc", ""))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if not to:
+        raise HTTPException(400, "Indiquez au moins un destinataire.")
+    return to, cc
+
+
+@app.post("/api/months/{month}/mail.eml")
+def mail_draft(month: str, body: dict = Body(...), user=INVOICE):
+    """Brouillon prêt à envoyer (Outlook) avec la facture PDF et l'Excel des projets en pièces jointes."""
+    res = _validated(month)
+    to, cc = _recipients(body)
+    st = db.settings(conn)
+    base = documents.file_base(res)
+    eml = documents.mail_eml(to, cc, str(body.get("subject") or ""), str(body.get("body") or ""), [
+        (f"{base}.pdf", documents.invoice_pdf(res, st), "application/pdf"),
+        (f"Projets-{base}.xlsx", documents.projects_workbook(res, st), XLSX),
+    ])
+    _remember_recipients(to, cc)
+    db.audit(conn, user, "facture.mail_prepare", month, {"a": to, "cc": cc})
+    return Response(eml, media_type="message/rfc822",
+                    headers={"Content-Disposition": f'attachment; filename="{base}.eml"'})
+
+
+@app.post("/api/months/{month}/mail/recipients")
+def mail_recipients(month: str, body: dict = Body(...), user=INVOICE):
+    _validated(month)
+    to, cc = _recipients(body)
+    _remember_recipients(to, cc)
+    db.audit(conn, user, "facture.mail_messagerie", month, {"a": to, "cc": cc})
+    return {"ok": True}
+
+
+@app.put("/api/mail/template")
+def mail_template(body: dict = Body(...), user=INVOICE):
+    """Modèle du mail ({numero}, {date}, {mois}, {total}, {client}, {emetteur}) ; vide = modèle par défaut."""
+    with db.tx(conn):
+        _put_setting("mail_subject", str(body.get("subject") or "")[:300])
+        _put_setting("mail_body", str(body.get("body") or "")[:5000])
+    db.audit(conn, user, "facture.mail_modele")
+    return {"ok": True}
 
 
 # ================================================================== temps : import avec aperçu

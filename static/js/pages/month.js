@@ -540,6 +540,78 @@ async function doAction(act, i, m) {
   }
 }
 
+// =================================================================== ENVOI PAR MAIL
+/** Prépare le mail de la facture validée : brouillon Outlook (.eml) avec la facture PDF et l'Excel des projets. */
+async function mailDialog(m) {
+  const st = await api(`/api/months/${m}/mail`);
+  const vars = [["numero", "numéro de facture"], ["date", "date de facture"], ["mois", "mois facturé"], ["total", "montant total"], ["client", "client"], ["emetteur", "émetteur"]];
+  const opts = st.history.map((a) => `<option value="${esc(a)}"></option>`).join("");
+  let mode = "mail";
+  await modal({
+    title: `Envoyer la facture de ${month.label(m)}`, size: "lg",
+    body: `<div class="mailbox">
+      <datalist id="mailHist">${opts}</datalist>
+      <div class="field"><label for="mTo">À</label><input id="mTo" list="mailHist" value="${esc(st.to)}" placeholder="prenom.nom@client.com, …" autocomplete="off"><div class="help">Plusieurs adresses : séparez-les par des virgules. Conservées pour le mois prochain.</div></div>
+      <div class="field"><label for="mCc">Cc</label><input id="mCc" list="mailHist" value="${esc(st.cc)}" placeholder="facultatif" autocomplete="off"></div>
+      <div id="mMail">
+        <div class="field"><label for="mSubj">Objet</label><input id="mSubj" value="${esc(st.subject)}"></div>
+        <div class="field"><label for="mBody">Message</label><textarea id="mBody" rows="11">${esc(st.body)}</textarea></div>
+      </div>
+      <div id="mTpl" hidden>
+        <div class="alert alert-info">${icon("info")}<div>Modèle utilisé chaque mois. Les champs entre accolades sont remplis automatiquement : ${vars.map(([k, l]) => `<code>{${k}}</code> ${l}`).join(" · ")}</div></div>
+        <div class="field"><label for="tSubj">Objet du modèle</label><input id="tSubj" value="${esc(st.subject_template)}"></div>
+        <div class="field"><label for="tBody">Message du modèle</label><textarea id="tBody" rows="11">${esc(st.body_template)}</textarea></div>
+        <div class="row" style="gap:8px;justify-content:flex-end"><button class="btn ghost" id="tReset">Modèle par défaut</button><button class="btn" id="tCancel">Annuler</button><button class="btn primary" id="tSave">${icon("check")}Enregistrer le modèle</button></div>
+      </div>
+      <div class="attach"><div class="xs muted" style="font-weight:600;margin-bottom:6px">Pièces jointes</div>
+        ${st.attachments.map((a, i) => `<button class="att" data-att="${i}" title="Télécharger">${icon(i ? "download" : "invoice")}<span>${esc(a)}</span></button>`).join("")}</div>
+      <button class="btn sm ghost" id="mEditTpl" style="justify-self:start">${icon("edit")}Modifier le modèle</button>
+    </div>`,
+    actions: [
+      { label: "Ouvrir dans ma messagerie (sans pièces jointes)", onClick: async (ctx) => {
+        const d = read(ctx); if (!d) return false;
+        await api(`/api/months/${m}/mail/recipients`, { method: "POST", json: d });
+        const q = (x) => encodeURIComponent(x);
+        location.href = `mailto:${d.to.split(/[,;]\s*/).map(q).join(",")}?${d.cc ? `cc=${q(d.cc)}&` : ""}subject=${q(d.subject)}&body=${q(d.body)}`;
+        toast("Ajoutez les deux pièces jointes téléchargées depuis cette fenêtre.", "info", { timeout: 9000 });
+        return false;
+      } },
+      { label: "Créer le mail avec les pièces jointes", kind: "primary", icon: "mail", onClick: async (ctx) => {
+        const d = read(ctx); if (!d) return false;
+        await download(`/api/months/${m}/mail.eml`, { method: "POST", json: d });
+        toast("Ouvrez le fichier téléchargé : le mail s'ouvre dans Outlook avec la facture et l'Excel joints, prêt à envoyer.", "success", { timeout: 10000 });
+        return true;
+      } },
+    ],
+    onMount: (ctx) => {
+      const el = ctx.el, show = (tpl) => { mode = tpl ? "tpl" : "mail"; $("#mMail", el).hidden = tpl; $("#mTpl", el).hidden = !tpl; $("#mEditTpl", el).hidden = tpl; };
+      $("#mEditTpl", el).onclick = () => show(true);
+      $("#tCancel", el).onclick = () => show(false);
+      $("#tReset", el).onclick = async () => {
+        await api("/api/mail/template", { method: "PUT", json: { subject: "", body: "" } });
+        const fresh = await api(`/api/months/${m}/mail`);
+        $("#tSubj", el).value = fresh.subject_template; $("#tBody", el).value = fresh.body_template;
+        $("#mSubj", el).value = fresh.subject; $("#mBody", el).value = fresh.body;
+        toast("Modèle par défaut rétabli", "success");
+      };
+      $("#tSave", el).onclick = async () => {
+        await api("/api/mail/template", { method: "PUT", json: { subject: $("#tSubj", el).value, body: $("#tBody", el).value } });
+        const fresh = await api(`/api/months/${m}/mail`);
+        $("#mSubj", el).value = fresh.subject; $("#mBody", el).value = fresh.body;
+        show(false); toast("Modèle enregistré : il servira aussi les mois suivants", "success");
+      };
+      $$("[data-att]", el).forEach((b) => b.onclick = () => download(b.dataset.att === "0" ? `/api/months/${m}/invoice.pdf` : `/api/months/${m}/projects.xlsx`));
+    },
+  });
+  function read(ctx) {
+    if (mode === "tpl") { toast("Enregistrez ou annulez d'abord la modification du modèle.", "warning"); return null; }
+    const g = (id) => $(id, ctx.el).value.trim();
+    const d = { to: g("#mTo"), cc: g("#mCc"), subject: g("#mSubj"), body: $("#mBody", ctx.el).value };
+    if (!d.to) { toast("Indiquez au moins un destinataire.", "warning"); $("#mTo", ctx.el).focus(); return null; }
+    return d;
+  }
+}
+
 // =================================================================== FACTURE
 /** Imprime uniquement la facture, en vue client, mise en page compacte (A4), sur une page quand c'est lisible. */
 function printInvoice(node) {
@@ -580,7 +652,10 @@ async function tabFacture(el, d, m, locked) {
   el.innerHTML = `<div class="row no-print" style="margin-bottom:14px">
       <div class="seg"><button class="${showInternal ? "on" : ""}" data-int="1">Vue détaillée</button><button class="${showInternal ? "" : "on"}" data-int="0">Vue client</button></div>
       <div style="flex:1"></div>
-      <button class="btn" id="printInv">${icon("printer")}<span class="hide-mobile">Imprimer / </span>PDF</button>
+      ${locked ? `<button class="btn" id="projXlsx" title="Liste des projets et de leur coût, comme dans la facture, projets et support / run séparés">${icon("download")}Excel projets</button>
+        <button class="btn" id="dlPdf" title="Télécharger la facture en PDF">${icon("download")}PDF</button>
+        ${can("invoice") ? `<button class="btn primary" id="mailInv">${icon("mail")}Envoyer par mail</button>` : ""}` : ""}
+      <button class="btn" id="printInv">${icon("printer")}<span class="hide-mobile">Imprimer</span></button>
       ${locked ? "" : can("invoice") ? `${d.blocking ? `<button class="btn" id="force">Valider malgré les alertes</button>` : ""}<button class="btn success" id="val" ${d.blocking ? "disabled" : ""}>${icon("lock")}Valider la facture</button>` : ""}</div>
     ${d.blocking && !locked ? `<div class="alert alert-warning no-print" style="margin-bottom:14px">${icon("alert")}<div class="grow">Aperçu provisoire : il reste des contrôles bloquants. <a href="#/mois/${m}/controles">Voir les contrôles</a></div></div>` : ""}
     <div class="invoice ${showInternal ? "" : "hide-internal"}">
@@ -604,6 +679,9 @@ async function tabFacture(el, d, m, locked) {
     rerender();
   }));
   $("#printInv", el).onclick = () => printInvoice($(".invoice", el));
+  $("#projXlsx", el)?.addEventListener("click", () => download(`/api/months/${m}/projects.xlsx`));
+  $("#dlPdf", el)?.addEventListener("click", () => download(`/api/months/${m}/invoice.pdf`));
+  $("#mailInv", el)?.addEventListener("click", () => mailDialog(m));
   const validate = async (force) => {
     if (!(await confirmDialog(force ? "Valider malgré les alertes ?" : "Valider la facture ?", `Total <b>${fmt.money(inv.total.price)}</b>. Le mois sera figé et les lots mensuels inscrits comme livrés au ${fmt.date(inv.date)}.`, { ok: "Valider", danger: force }))) return;
     await api(`/api/months/${m}/validate?force=${force}`, { method: "POST" });
