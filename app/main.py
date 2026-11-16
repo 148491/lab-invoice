@@ -20,7 +20,7 @@ STATIC = Path(__file__).resolve().parent.parent / "static"
 MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 SECURE_COOKIE = os.environ.get("FACTU_SECURE_COOKIE", "0") == "1"
 
-app = FastAPI(title="Lab Facturation", docs_url=None, redoc_url=None)
+app = FastAPI(title="Lab Facturation", docs_url=None, redoc_url=None, openapi_url=None)
 conn = db.ThreadLocalConnection()
 db.init(conn)
 current_user, require = auth.make_dependencies(lambda: conn)
@@ -79,6 +79,9 @@ async def security_headers(request: Request, call_next):
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["X-Frame-Options"] = "SAMEORIGIN"
     resp.headers["Referrer-Policy"] = "same-origin"
+    resp.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    if SECURE_COOKIE:   # servi en HTTPS : le navigateur refuse ensuite toute connexion en clair
+        resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     if request.url.path.startswith("/api/"):
         resp.headers["Cache-Control"] = "no-store"
     return resp

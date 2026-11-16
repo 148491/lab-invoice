@@ -220,7 +220,7 @@ async function reviewTimesheet(pv, m) {
     ${pv.summaries.length ? `<p class="small muted" style="margin-top:12px">${icon("info")} Feuilles individuelles lues : ${pv.summaries.map((s) => `<b>${esc(s.collaborator)}</b> (${s.hours ? fmt.h(s.hours) + " saisies" : ""}${s.holidays ? ` ${fmt.num(s.holidays)} j d'absence` : ""})`).join(", ")}.</p>` : ""}
     ${pv.unknown_epics.length ? `<div class="alert alert-warning" style="margin-top:12px">${icon("tag")}<div class="grow"><div class="alert-title">Epics absentes du référentiel</div><div class="small">${pv.unknown_epics.slice(0, 8).map((e) => `${esc(e.epic)} (${fmt.h(e.hours)})`).join(" · ")}${pv.unknown_epics.length > 8 ? " …" : ""}</div><div class="xs muted">Elles seront signalées dans les contrôles, où vous pourrez les ajouter en un clic.</div></div></div>` : ""}`;
   const res = await modal({
-    title: `Vérifier l'import — ${esc(pv.totals.lines)} lignes`, size: "xl", body,
+    title: `Vérifier l'import — ${pv.totals.lines} lignes`, size: "xl", body,
     actions: [{ label: "Annuler" }, {
       label: `Importer ${fmt.h(pv.totals.hours)}`, kind: "primary", icon: "check",
       onClick: async (ctx) => api(`/api/months/${m}/timesheet/commit`, { method: "POST", json: { token: pv.token, decisions: collectDecisions(ctx.el) } }),
@@ -376,7 +376,7 @@ function adjustDialog(x, d) {
     <p class="xs faint" style="margin:10px 0 0">Seules les proportions comptent : le coût de ${esc(who)} est réparti selon la part de chaque lot. Entrée = lot suivant.</p></div>`;
 
   return modal({
-    title: `Ajuster la répartition — ${esc(who)}`, size: "wide", body,
+    title: `Ajuster la répartition — ${who}`, size: "wide", body,
     actions: [{ label: "Annuler" }, { label: "Enregistrer et fermer", kind: "primary", icon: "check", onClick: () => {
       const lots = {};
       rows.forEach((r) => { const h = +r.hours || 0; if (h > 0) lots[r.lot] = Math.round(((lots[r.lot] || 0) + h) * 100) / 100; });

@@ -125,7 +125,7 @@ export function modal({ title, body = "", size = "md", actions = [], onMount, di
     const wrap = document.createElement("div");
     wrap.className = "modal-backdrop";
     wrap.innerHTML = `<div class="modal modal-${size}" role="dialog" aria-modal="true" aria-label="${esc(title)}">
-      <header class="modal-head"><h2>${title}</h2>${dismissable ? `<button class="icon-btn" data-close aria-label="Fermer">${icon("x")}</button>` : ""}</header>
+      <header class="modal-head"><h2>${esc(title)}</h2>${dismissable ? `<button class="icon-btn" data-close aria-label="Fermer">${icon("x")}</button>` : ""}</header>
       <div class="modal-body">${body}</div>
       ${actions.length ? `<footer class="modal-foot">${actions.map((a, i) => `<button class="btn ${a.kind || ""}" data-act="${i}" ${a.disabled ? "disabled" : ""}>${a.icon ? icon(a.icon) : ""}${esc(a.label)}</button>`).join("")}</footer>` : ""}
     </div>`;
